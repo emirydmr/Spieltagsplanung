@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spieltagsplaner – WFV</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+
+<!-- ─── Hero ──────────────────────────────────────────────── -->
+<section class="hero">
+    <div class="hero-content">
+        <div class="hero-logo">
+            <img src="/assets/wfv-logo.jpg" alt="Württembergischer Fußballverband">
+        </div>
+
+        <h1>Spieltags<span class="accent">planer</span></h1>
+        <p class="subtitle">
+            Staffeleinteilung &amp; Spielplanung für den Jugendfußball<br>
+            Württembergischer Fußballverband – Bezirk Franken
+        </p>
+
+        <div class="hero-features">
+            <div class="hero-feature">
+                <div class="hero-feature-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                </div>
+                <span>Meldeliste Import</span>
+            </div>
+            <div class="hero-feature">
+                <div class="hero-feature-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                </div>
+                <span>Staffeleinteilung</span>
+            </div>
+            <div class="hero-feature">
+                <div class="hero-feature-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                </div>
+                <span>Spielplanung</span>
+            </div>
+            <div class="hero-feature">
+                <div class="hero-feature-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                </div>
+                <span>Analyse &amp; Export</span>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+            <a href="/app" class="btn btn-primary btn-lg">
+                Einteilung starten
+            </a>
+            <a href="#about" class="btn btn-outline btn-lg">
+                Mehr erfahren
+            </a>
+        </div>
+    </div>
+</section>
+
+<!-- ─── About ─────────────────────────────────────────────── -->
+<section id="about" style="max-width: 900px; margin: 0 auto; padding: 5rem 2rem;">
+    <h2 style="font-size: 1.8rem; margin-bottom: 1rem;">Was ist der Spieltagsplaner?</h2>
+    <p style="color: var(--text-muted); font-size: 1.05rem; line-height: 1.8; margin-bottom: 2rem;">
+        Der Spieltagsplaner unterstützt die Staffelleiter des Bezirks Franken bei der
+        Einteilung von Jugendmannschaften in Staffeln. Auf Basis der DFBnet-Meldelisten
+        werden Mannschaften automatisch nach regionaler Nähe, Spielklasse und
+        Leistungstopf optimal verteilt – unter Beachtung aller Regularien.
+    </p>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem;">
+        <div class="card">
+            <div class="card-body">
+                <h4 style="margin-bottom: 0.5rem;">Automatische Einteilung</h4>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">
+                    Geo-Clustering & Score-Optimierung sorgen für kurze Wege und
+                    faire Staffelgrößen.
+                </p>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-body">
+                <h4 style="margin-bottom: 0.5rem;">Distanzberechnung</h4>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">
+                    Alle Spielstätten sind geocodiert. Die maximale Fahrdistanz
+                    pro Staffel wird transparent angezeigt.
+                </p>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-body">
+                <h4 style="margin-bottom: 0.5rem;">Anpassbar</h4>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">
+                    Gewichtungen für Distanz, Region und Balance sind per Slider
+                    konfigurierbar.
+                </p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ─── Footer ────────────────────────────────────────────── -->
+<footer style="text-align: center; padding: 2rem; color: var(--text-light); font-size: 0.85rem; border-top: 1px solid var(--border);">
+    Spieltagsplaner · Württembergischer Fußballverband · Bezirk Franken
+</footer>
+
+</body>
+</html>
