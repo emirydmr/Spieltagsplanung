@@ -8,41 +8,28 @@ import csv
 import sys
 from pathlib import Path
 
-import openpyxl
-
 # Projekt-Root zum Python-Path hinzufügen
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.common.distanz import geocode_adressen, berechne_distanzmatrix
+from src.data_import.meldeliste_parser import parse_meldeliste
 
 
 def extrahiere_spielstaetten(excel_path: str) -> dict[str, str]:
-    """Extrahiert einzigartige Spielstätten aus der Meldeliste.
+    """Extrahiert einzigartige Spielstätten aus der Meldeliste über den Parser.
 
     Returns:
         Dict: voller Spielstätten-String -> Adresse (ohne Facility-Name)
     """
-    wb = openpyxl.load_workbook(excel_path, read_only=True)
-    ws = wb[wb.sheetnames[0]]
+    mannschaften = parse_meldeliste(excel_path)
 
     spielstaetten: dict[str, str] = {}
+    for m in mannschaften:
+        if m.spielstaette and m.spielstaette.adresse:
+            full = f"{m.spielstaette.name}, {m.spielstaette.adresse}" if m.spielstaette.name else m.spielstaette.adresse
+            spielstaetten[full] = m.spielstaette.adresse
 
-    for i, row in enumerate(ws.iter_rows(values_only=True)):
-        if i < 3:
-            continue
-        # Spielfeld-Spalten: 21, 23, 25, 27 (0-indexed)
-        for col_idx in [21, 23, 25, 27]:
-            if len(row) > col_idx:
-                val = row[col_idx]
-                if val and str(val).strip():
-                    full = str(val).strip()
-                    parts = full.split(", ")
-                    if len(parts) >= 2:
-                        adresse = ", ".join(parts[1:])
-                        spielstaetten[full] = adresse
-
-    wb.close()
     return spielstaetten
 
 

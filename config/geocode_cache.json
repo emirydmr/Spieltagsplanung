@@ -610,9 +610,9 @@
     "display": "FC Creglingen 1920 e.V. - Tennisabteilung, Rothenburger Straße, Creglingen, Main-Tauber-Kreis, Baden-Württemberg, 97993, Deutschland"
   },
   "fc ottendorf, an der b 19, 74405 ottendorf": {
-    "lat": 50.0196978,
-    "lon": 10.358632,
-    "display": "An der B 26, Ottendorf, Gädheim, Theres (VGem), Landkreis Haßberge, Bayern, 97503, Deutschland"
+    "lat": 49.07,
+    "lon": 10.02,
+    "display": "Ottendorf bei Gaildorf, Deutschland (manuell korrigiert)"
   },
   "fv künzelsau, hallstattweg 36, 74653 künzelsau-zentrum": {
     "lat": 49.2990193,
@@ -903,5 +903,195 @@
     "lat": 49.2134709,
     "lon": 9.5858935,
     "display": "Öhringer Straße, Neuenstein, GVV Hohenloher Ebene, Hohenlohekreis, Baden-Württemberg, 74632, Deutschland"
+  },
+  "am schäufelfeld 20, 74426 bühlerzell": {
+    "lat": 49.0046051,
+    "lon": 9.9224728,
+    "display": "20, Am Schäufelfeld, Bühlerzell, GVV Oberes Bühlertal, Landkreis Schwäbisch Hall, Baden-Württemberg, 74426, Deutschland"
+  },
+  "an den sportanlagen 6, 74585 rot am see": {
+    "lat": 49.2454124,
+    "lon": 10.026372,
+    "display": "6, An den Sportanlagen, Stöcke, Rot am See (Kernort), Rot am See, GVV Brettach/Jagst, Landkreis Schwäbisch Hall, Baden-Württemberg, 74585, Deutschland"
+  },
+  "aspacher str., 74532 ilshofen": {
+    "lat": 49.164097,
+    "lon": 9.912654,
+    "display": "Aspacher Straße, Ilshofen, GVV Ilshofen-Vellberg, Landkreis Schwäbisch Hall, Baden-Württemberg, 74532, Deutschland"
+  },
+  "breitwiesen 1 (an der b 293), 74211 leingarten-schluchtern": {
+    "lat": 49.1446962,
+    "lon": 9.124241,
+    "display": "74211, Großgartach, Leingarten, Landkreis Heilbronn, Baden-Württemberg, Deutschland"
+  },
+  "djk bieringen, 74214 schöntal-bieringen": {
+    "lat": 49.346311,
+    "lon": 9.5460721,
+    "display": "74214, Bieringen, Schöntal, Hohenlohekreis, Baden-Württemberg, Deutschland"
+  },
+  "fc billingsbach, 74572 billingsbach": {
+    "lat": 49.303369,
+    "lon": 9.90177,
+    "display": "FC Billingsbach, In den Gärten, Billingsbach, Blaufelden, Landkreis Schwäbisch Hall, Baden-Württemberg, 74572, Deutschland"
+  },
+  "fc honhardt, 74586 frankenhardt-honhardt": {
+    "lat": 49.0672505,
+    "lon": 10.0507071,
+    "display": "FC Honhardt e.V., Ostweg, Honhardt, Frankenhardt, VVG der Stadt Crailsheim, Landkreis Schwäbisch Hall, Baden-Württemberg, 74586, Deutschland"
+  },
+  "fc ottendorf, 74405 ottendorf": {
+    "lat": 49.07,
+    "lon": 10.02,
+    "display": "Ottendorf bei Gaildorf, Deutschland (manuell korrigiert)"
+  },
+  "fv künzelsau, 74653 künzelsau-zentrum": {
+    "lat": 49.2990193,
+    "lon": 9.7064645,
+    "display": "74653, Siegelhof, Belsenberg, Künzelsau, VVG der Stadt Künzelsau, Hohenlohekreis, Baden-Württemberg, Deutschland"
+  },
+  "falltorstr. 10, 74193 schwaigern": {
+    "lat": 49.1447016,
+    "lon": 9.0482445,
+    "display": "Sportheim, 10, Falltorstraße, Schwaigern, VVG der Stadt Schwaigern, Landkreis Heilbronn, Baden-Württemberg, 74193, Deutschland"
+  },
+  "flügelaustraße 29, 74363 eibensbach": {
+    "lat": 49.0525521,
+    "lon": 9.0020404,
+    "display": "29, Flügelaustraße, Eibensbach, Güglingen, GVV Oberes Zabergäu, Landkreis Heilbronn, Baden-Württemberg, 74363, Deutschland"
+  },
+  "gartenstr. 24, 74249 jagsthausen-zentrum": {
+    "lat": 49.3085582,
+    "lon": 9.4706117,
+    "display": "Grundschule Am Römerbad, 24, Gartenstraße, Jagsthausen, VVG der Stadt Möckmühl, Landkreis Heilbronn, Baden-Württemberg, 74249, Deutschland"
+  },
+  "grabenstr., 74582 gerabronn": {
+    "lat": 49.2504418,
+    "lon": 9.9206087,
+    "display": "Grabenstraße, Gerabronn, VVG der Stadt Gerabronn, Landkreis Schwäbisch Hall, Baden-Württemberg, 74582, Deutschland"
+  },
+  "hagenbacher ring, 74523 schwäbisch hall": {
+    "lat": 49.0969066,
+    "lon": 9.7359673,
+    "display": "Hagenbacher Ring, Hagenbach, Tullauer Höhe/Hagenbach, Schwäbisch Hall, VVG der Stadt Schwäbisch Hall, Landkreis Schwäbisch Hall, Baden-Württemberg, 74523, Deutschland"
+  },
+  "hagenbusch, 74423 obersontheim": {
+    "lat": 49.0612362,
+    "lon": 9.8987997,
+    "display": "Hagenbusch, Obersontheim, GVV Oberes Bühlertal, Landkreis Schwäbisch Hall, Baden-Württemberg, 74423, Deutschland"
+  },
+  "hagenhofweg, 74544 michelbach an der bilz": {
+    "lat": 49.0714878,
+    "lon": 9.7697852,
+    "display": "Hagenhofweg, Hagenhof, Michelbach an der Bilz, VVG der Stadt Schwäbisch Hall, Landkreis Schwäbisch Hall, Baden-Württemberg, 74544, Deutschland"
+  },
+  "heilbronner str. 56, 74252 massenbachhausen": {
+    "lat": 49.1749936,
+    "lon": 9.046672,
+    "display": "Mehrzweckhalle, 56, Heilbronner Straße, Massenbachhausen, VVG der Stadt Schwaigern, Landkreis Heilbronn, Baden-Württemberg, 74252, Deutschland"
+  },
+  "kirchstr., 74564 crailsheim": {
+    "lat": 49.1267585,
+    "lon": 10.0540825,
+    "display": "Kirchstraße, Altenmünster, Crailsheim, VVG der Stadt Crailsheim, Landkreis Schwäbisch Hall, Baden-Württemberg, 74564, Deutschland"
+  },
+  "lange wiesen 1, 74081 heilbronn-klingenberg": {
+    "lat": 49.1213566,
+    "lon": 9.1707576,
+    "display": "Vereinsheim SSV Klingenberg 1896 e.V., 1, Lange Wiesen, Klingenberg, Heilbronn, Baden-Württemberg, 74081, Deutschland"
+  },
+  "mittelgasse 24, 74599 wallhausen-hengstfeld": {
+    "lat": 49.2201296,
+    "lon": 10.0977739,
+    "display": "24, Mittelgasse, Asbach, Hengstfeld, Wallhausen, GVV Brettach/Jagst, Landkreis Schwäbisch Hall, Baden-Württemberg, 74599, Deutschland"
+  },
+  "nagelsberg, 74653 künzelsau-nagelsberg": {
+    "lat": 49.2925682,
+    "lon": 9.6756639,
+    "display": "Burg Nagelsberg, Nagelsberger Schloss, Nagelsberg, Künzelsau, VVG der Stadt Künzelsau, Hohenlohekreis, Baden-Württemberg, 74653, Deutschland"
+  },
+  "sv ingersheim, 74564 crailsheim": {
+    "lat": 49.1214594,
+    "lon": 10.0707316,
+    "display": "SV Ingersheim 1950 e.V., Oberes Lehen, Ingersheim, Crailsheim, VVG der Stadt Crailsheim, Landkreis Schwäbisch Hall, Baden-Württemberg, 74564, Deutschland"
+  },
+  "schenkenseestr., 74523 schwäbisch hall": {
+    "lat": 49.1166237,
+    "lon": 9.7499488,
+    "display": "Schenkenseestraße, Lehen, Kreuzäcker, Schwäbisch Hall, VVG der Stadt Schwäbisch Hall, Landkreis Schwäbisch Hall, Baden-Württemberg, 74523, Deutschland"
+  },
+  "schönebürgstr., 74564 crailsheim": {
+    "lat": 49.1377771,
+    "lon": 10.0751088,
+    "display": "Schönebürgstraße, Innenstadt, Crailsheim, VVG der Stadt Crailsheim, Landkreis Schwäbisch Hall, Baden-Württemberg, 74564, Deutschland"
+  },
+  "seestr. 72, 74595 langenburg": {
+    "lat": 49.2524993,
+    "lon": 9.861519,
+    "display": "Stadthalle Langenburg, 72, Seestraße, Atzenrod, Langenburg, VVG der Stadt Gerabronn, Landkreis Schwäbisch Hall, Baden-Württemberg, 74595, Deutschland"
+  },
+  "sportgaststätte bellissima, 71543 wüstenrot": {
+    "lat": 49.0904359,
+    "lon": 9.4632914,
+    "display": "71543, Weihenbronn, Wüstenrot, Landkreis Heilbronn, Baden-Württemberg, Deutschland"
+  },
+  "stadionweg 9, 74575 schrozberg": {
+    "lat": 49.344626,
+    "lon": 9.9731988,
+    "display": "9, Stadionweg, Schrozberg, Landkreis Schwäbisch Hall, Baden-Württemberg, 74575, Deutschland"
+  },
+  "steinbühl, 74535 mainhardt": {
+    "lat": 49.0794456,
+    "lon": 9.5536041,
+    "display": "Steinbühl, Baad, Mittelmühle, Gailsbach, Mainhardt, Landkreis Schwäbisch Hall, Baden-Württemberg, 74535, Deutschland"
+  },
+  "tsv dörzbach, 74677 dörzbach-zentrum": {
+    "lat": 49.3824232,
+    "lon": 9.6991389,
+    "display": "TSV Dörzbach, 30, Meßbacher Straße, Dörzbach, GVV Krautheim, Hohenlohekreis, Baden-Württemberg, 74677, Deutschland"
+  },
+  "tsv eutendorf, 74405 gaildorf-eutendorf": {
+    "lat": 49.0214581,
+    "lon": 9.7726036,
+    "display": "Turn- und Sportverein Eutendorf 1966 e. V., K 2617, Eutendorf, Gaildorf, GVV Limpurger Land, Landkreis Schwäbisch Hall, Baden-Württemberg, 74405, Deutschland"
+  },
+  "tsv röttingen, 97285 röttingen-zentrum": {
+    "lat": 49.5088345,
+    "lon": 9.9743667,
+    "display": "TSV Röttingen, Schulstraße, Eibe Spielgeräte, Röttingen, Verwaltungsgemeinschaft Röttingen, Landkreis Würzburg, Bayern, 97285, Deutschland"
+  },
+  "tsv schwabbach, 74626 bretzfeld-schwabbach": {
+    "lat": 49.1567606,
+    "lon": 9.4385244,
+    "display": "74626, Scheppach, Bretzfeld, Hohenlohekreis, Baden-Württemberg, Deutschland"
+  },
+  "tsv vellberg, 74541 vellberg-talheim": {
+    "lat": 49.097555,
+    "lon": 9.8820996,
+    "display": "TSV Vellberg, In den Sportanlagen, Talheim, Vellberg, GVV Ilshofen-Vellberg, Landkreis Schwäbisch Hall, Baden-Württemberg, 74541, Deutschland"
+  },
+  "todtenwald, 74374 zaberfeld-leonbronn": {
+    "lat": 49.0596327,
+    "lon": 8.8802045,
+    "display": "Todtenwaldweg, Leonbronn, Zaberfeld, GVV Oberes Zabergäu, Landkreis Heilbronn, Baden-Württemberg, 74374, Deutschland"
+  },
+  "uferweg 20, 74592 kirchberg an der jagst": {
+    "lat": 49.2086485,
+    "lon": 9.9826788,
+    "display": "Uferweg, Jugendherberge, Hornberg, Kirchberg an der Jagst, GVV Brettach/Jagst, Landkreis Schwäbisch Hall, Baden-Württemberg, 74592, Deutschland"
+  },
+  "ziegelberg 40, 74538 rosengarten-rieden": {
+    "lat": 49.0647124,
+    "lon": 9.70726,
+    "display": "Ziegelberg, Rieden, Rosengarten, VVG der Stadt Schwäbisch Hall, Landkreis Schwäbisch Hall, Baden-Württemberg, 74538, Deutschland"
+  },
+  "zum sportplatz, 74639 zweiflingen": {
+    "lat": 49.2547589,
+    "lon": 9.5182054,
+    "display": "Zum Sportplatz, Zweiflingen, VVG der Stadt Öhringen, Hohenlohekreis, Baden-Württemberg, 74639, Deutschland"
+  },
+  "zur schön, 74177 bad friedrichshall-duttenberg": {
+    "lat": 49.2485226,
+    "lon": 9.1897299,
+    "display": "Zur Schön, Duttenberg, Bad Friedrichshall, VVG der Stadt Bad Friedrichshall, Landkreis Heilbronn, Baden-Württemberg, 74177, Deutschland"
   }
 }
