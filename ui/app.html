@@ -64,41 +64,6 @@
                     </div>
                 </div>
 
-                <!-- Settings -->
-                <div class="card" style="margin-bottom: 1.5rem;">
-                    <div class="card-header">
-                        <h3>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                            Einstellungen
-                        </h3>
-                        <button class="btn btn-sm btn-secondary" id="resetSettings">Zurücksetzen</button>
-                    </div>
-                    <div class="card-body">
-                        <div class="settings-grid">
-                            <div class="setting-item">
-                                <label>Gewicht Distanz</label>
-                                <input type="range" id="wDistanz" min="0" max="5" step="0.1" value="1.0">
-                                <span class="setting-value" id="wDistanzVal">1.0</span>
-                            </div>
-                            <div class="setting-item">
-                                <label>Gewicht Region</label>
-                                <input type="range" id="wRegion" min="0" max="100" step="5" value="50">
-                                <span class="setting-value" id="wRegionVal">50</span>
-                            </div>
-                            <div class="setting-item">
-                                <label>Gewicht Balance</label>
-                                <input type="range" id="wBalance" min="0" max="50" step="1" value="20">
-                                <span class="setting-value" id="wBalanceVal">20</span>
-                            </div>
-                            <div class="setting-item">
-                                <label>Max. Staffelgröße</label>
-                                <input type="range" id="maxSize" min="8" max="14" step="1" value="11">
-                                <span class="setting-value" id="maxSizeVal">11</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <button class="btn btn-primary btn-lg" id="btnStart" disabled style="width: 100%;">
                     Einteilung berechnen
                 </button>
@@ -115,38 +80,45 @@
                     <div></div>
                 </div>
 
+                <!-- Stats -->
                 <div class="stats-row" id="statsRow"></div>
 
-                <!-- Map -->
-                <div class="card" style="margin-bottom: 1.5rem;">
-                    <div class="card-header">
-                        <h3>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
-                            Karte
-                        </h3>
-                        <select id="mapGruppeFilter" class="filter-select">
-                            <option value="">Alle Gruppen</option>
-                        </select>
+                <!-- Two-column layout: Map + Groups -->
+                <div class="results-grid">
+                    <!-- Left: Map -->
+                    <div class="results-map">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+                                    Karte
+                                </h3>
+                                <select id="mapGruppeFilter" class="filter-select">
+                                    <option value="">Alle Gruppen</option>
+                                </select>
+                            </div>
+                            <div class="card-body" style="padding: 0;">
+                                <div id="map" style="height: 500px; border-radius: 0 0 var(--radius) var(--radius);"></div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="card-body" style="padding: 0;">
-                        <div id="map" style="height: 500px; border-radius: 0 0 var(--radius-lg) var(--radius-lg);"></div>
+
+                    <!-- Right: Groups -->
+                    <div class="results-groups">
+                        <div style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+                            <select id="filterAk" class="filter-select">
+                                <option value="">Alle Altersklassen</option>
+                            </select>
+                            <select id="filterSk" class="filter-select">
+                                <option value="">Alle Spielklassen</option>
+                            </select>
+                            <button class="btn btn-sm btn-secondary" id="btnExpandAll">Alle aufklappen</button>
+                            <button class="btn btn-sm btn-secondary" id="btnCollapseAll">Alle zuklappen</button>
+                        </div>
+
+                        <div id="gruppenContainer"></div>
                     </div>
                 </div>
-
-                <!-- Filter -->
-                <div style="margin-bottom: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
-                    <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted);">Filter:</span>
-                    <select id="filterAk" class="filter-select">
-                        <option value="">Alle Altersklassen</option>
-                    </select>
-                    <select id="filterSk" class="filter-select">
-                        <option value="">Alle Spielklassen</option>
-                    </select>
-                    <button class="btn btn-sm btn-secondary" id="btnExpandAll">Alle aufklappen</button>
-                    <button class="btn btn-sm btn-secondary" id="btnCollapseAll">Alle zuklappen</button>
-                </div>
-
-                <div id="gruppenContainer"></div>
             </section>
         </div>
 

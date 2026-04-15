@@ -20,23 +20,18 @@
     const filterSk = $('#filterSk');
     const btnExpandAll = $('#btnExpandAll');
     const btnCollapseAll = $('#btnCollapseAll');
-    const resetSettings = $('#resetSettings');
     const mapGruppeFilter = $('#mapGruppeFilter');
 
     // Map
     let map = null;
     let mapLayers = [];
 
-    // Sliders
-    const sliders = {
-        wDistanz: { el: $('#wDistanz'), valEl: $('#wDistanzVal') },
-        wRegion:  { el: $('#wRegion'),  valEl: $('#wRegionVal') },
-        wBalance: { el: $('#wBalance'), valEl: $('#wBalanceVal') },
-        maxSize:  { el: $('#maxSize'),  valEl: $('#maxSizeVal') },
-    };
-
     let selectedFile = null;
     let resultData = null;
+
+    // Drag-and-drop state
+    let dragTeam = null;   // { gruppeIdx, staffelIdx, teamIdx, data }
+    let editGruppeIdx = null; // which gruppe is currently being edited
 
     // ─── Tab Switching ───────────────────────────────────────
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -86,20 +81,6 @@
         btnStart.disabled = false;
     }
 
-    // ─── Sliders ─────────────────────────────────────────────
-    Object.values(sliders).forEach(({ el, valEl }) => {
-        el.addEventListener('input', () => {
-            valEl.textContent = el.value;
-        });
-    });
-
-    resetSettings.addEventListener('click', () => {
-        sliders.wDistanz.el.value = '1.0'; sliders.wDistanz.valEl.textContent = '1.0';
-        sliders.wRegion.el.value = '50'; sliders.wRegion.valEl.textContent = '50';
-        sliders.wBalance.el.value = '20'; sliders.wBalance.valEl.textContent = '20';
-        sliders.maxSize.el.value = '11'; sliders.maxSize.valEl.textContent = '11';
-    });
-
     // ─── Start Button ────────────────────────────────────────
     btnStart.addEventListener('click', async () => {
         if (!selectedFile) return;
@@ -109,15 +90,8 @@
         const formData = new FormData();
         formData.append('file', selectedFile);
 
-        const params = new URLSearchParams({
-            w_distanz: sliders.wDistanz.el.value,
-            w_region: sliders.wRegion.el.value,
-            w_balance: sliders.wBalance.el.value,
-            max_staffel_size: sliders.maxSize.el.value,
-        });
-
         try {
-            const resp = await fetch(`/api/einteilung?${params}`, {
+            const resp = await fetch('/api/einteilung', {
                 method: 'POST',
                 body: formData,
             });
@@ -158,25 +132,21 @@
         statsRow.innerHTML = `
             <div class="stat-card">
                 <div class="stat-value">${data.total_teams}</div>
-                <div class="stat-label">Mannschaften</div>
+                <div class="stat-label">Teams</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">${totalStaffeln}</div>
                 <div class="stat-label">Staffeln</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">${data.teams_mit_coords}</div>
-                <div class="stat-label">mit Koordinaten</div>
+                <div class="stat-value">${avgDist.toFixed(1)}</div>
+                <div class="stat-label">Ø Distanz (km)</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value" style="color: ${totalViolations > 0 ? 'var(--danger)' : 'var(--success)'}">
                     ${totalViolations}
                 </div>
-                <div class="stat-label">Violations</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">${avgDist.toFixed(1)}</div>
-                <div class="stat-label">Ø Distanz (km)</div>
+                <div class="stat-label">Probleme</div>
             </div>
         `;
 
@@ -226,18 +196,27 @@
                     : '<span class="gruppe-badge badge-gold">Topf 2</span>';
 
             const violBadge = g.score && g.score.violations > 0
-                ? `<span class="gruppe-badge badge-red">${g.score.violations} Violations</span>`
+                ? `<span class="gruppe-badge badge-red">${g.score.violations} Probleme</span>`
                 : '';
 
             const scoreInfo = g.score
-                ? `<span>Score: ${g.score.total}</span><span>Ø ${g.score.distanz} km</span>`
+                ? `<span>Ø ${g.score.distanz} km</span>`
                 : '';
 
-            const staffelnHtml = g.staffeln.map((s, si) => renderStaffel(s, si)).join('');
+            // Find the real index inside resultData.gruppen
+            const realIdx = resultData.gruppen.indexOf(g);
+            const staffelnHtml = g.staffeln.map((s, si) => renderStaffel(s, si, realIdx)).join('');
+
+            const editBtn = g.staffeln.length > 1
+                ? `<button class="btn btn-sm btn-secondary edit-gruppe-btn" data-gruppe="${realIdx}" onclick="event.stopPropagation(); window.openEditPanel(${realIdx})">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    Bearbeiten
+                  </button>`
+                : '';
 
             return `
-                <div class="gruppe" data-index="${gi}">
-                    <div class="gruppe-header" onclick="toggleGruppe(this)">
+                <div class="gruppe" data-index="${realIdx}">
+                    <div class="gruppe-header" onclick="toggleGruppe(this)" data-real-idx="${realIdx}">
                         <div class="gruppe-title">
                             <span>${g.altersklasse}</span>
                             ${topfBadge}
@@ -248,6 +227,7 @@
                         </div>
                         <div class="gruppe-meta">
                             ${scoreInfo}
+                            ${editBtn}
                             <span class="gruppe-chevron">▼</span>
                         </div>
                     </div>
@@ -259,7 +239,7 @@
         }).join('');
     }
 
-    function renderStaffel(staffel, index) {
+    function renderStaffel(staffel, staffelIdx, gruppeIdx) {
         const dr = staffel.doppelrunde ? '<span class="gruppe-badge badge-gold">Doppelrunde</span>' : '';
         const sizes = `${staffel.n_teams} Teams`;
         const maxDist = staffel.max_distanz_km > 0
@@ -276,7 +256,7 @@
             .map(([r, n]) => `${r}: ${n}`)
             .join(' · ');
 
-        const rows = staffel.teams.map(t => {
+        const rows = staffel.teams.map((t, ti) => {
             const dotClass = t.region === 'Hohenlohe' ? 'hohenlohe'
                 : t.region === 'Unterland' ? 'unterland'
                 : 'unknown';
@@ -291,10 +271,10 @@
         }).join('');
 
         return `
-            <div class="staffel">
+            <div class="staffel" data-gruppe="${gruppeIdx}" data-staffel="${staffelIdx}">
                 <div class="staffel-header">
                     <div class="staffel-name">
-                        Staffel ${index + 1} ${dr}
+                        Staffel ${staffelIdx + 1} ${dr}
                     </div>
                     <div class="staffel-info">
                         <span>${sizes}</span>
@@ -454,10 +434,151 @@
         document.querySelectorAll('.gruppe').forEach(g => g.classList.remove('open'));
     });
 
-    // ─── Toggle Gruppe (global) ──────────────────────────────
+    // ─── Toggle Gruppe (global) → also filter map ──────────
     window.toggleGruppe = function (header) {
-        header.closest('.gruppe').classList.toggle('open');
+        const gruppe = header.closest('.gruppe');
+        gruppe.classList.toggle('open');
+
+        // When opening a gruppe, filter map to show only that gruppe
+        if (gruppe.classList.contains('open') && resultData) {
+            const realIdx = header.dataset.realIdx;
+            if (realIdx !== undefined) {
+                mapGruppeFilter.value = realIdx;
+                renderMap(resultData);
+            }
+        }
     };
+
+    // ─── Edit Panel (reassign teams between staffeln) ────────
+    window.openEditPanel = function (gruppeIdx) {
+        editGruppeIdx = gruppeIdx;
+        renderEditPanel();
+    };
+
+    function renderEditPanel() {
+        if (editGruppeIdx == null || !resultData) return;
+
+        const g = resultData.gruppen[editGruppeIdx];
+        if (!g) return;
+
+        // Build a flat list of all teams with their current staffel assignment
+        const allTeams = [];
+        g.staffeln.forEach((s, si) => {
+            s.teams.forEach(t => {
+                allTeams.push({ team: t, staffelIdx: si });
+            });
+        });
+        allTeams.sort((a, b) => a.team.mannschaft.localeCompare(b.team.mannschaft));
+
+        const staffelOptions = g.staffeln.map((s, si) =>
+            `<option value="${si}">Staffel ${si + 1}</option>`
+        ).join('');
+
+        const rows = allTeams.map((item, idx) => {
+            const dotClass = item.team.region === 'Hohenlohe' ? 'hohenlohe'
+                : item.team.region === 'Unterland' ? 'unterland'
+                : 'unknown';
+            const ort = item.team.adresse ? item.team.adresse.split(', ').pop() : '';
+            return `
+                <tr>
+                    <td>${item.team.mannschaft}</td>
+                    <td><span class="region-dot ${dotClass}"></span>${item.team.region}</td>
+                    <td>${ort}</td>
+                    <td>
+                        <select class="filter-select edit-staffel-select" data-edit-idx="${idx}">
+                            ${staffelOptions.replace(
+                                `value="${item.staffelIdx}"`,
+                                `value="${item.staffelIdx}" selected`
+                            )}
+                        </select>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        // Store team refs for saving
+        gruppenContainer._editTeams = allTeams;
+
+        gruppenContainer.innerHTML = `
+            <div class="edit-panel card">
+                <div class="card-header">
+                    <h3>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        ${g.altersklasse} ${g.topf} bearbeiten
+                    </h3>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn btn-sm btn-primary" id="btnSaveEdit">Speichern</button>
+                        <button class="btn btn-sm btn-secondary" id="btnCancelEdit">Abbrechen</button>
+                    </div>
+                </div>
+                <div class="card-body" style="padding: 0;">
+                    <table class="teams-table edit-table">
+                        <thead>
+                            <tr>
+                                <th>Mannschaft</th>
+                                <th>Region</th>
+                                <th>Ort</th>
+                                <th>Staffel</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+
+        // Filter map to this gruppe
+        mapGruppeFilter.value = String(editGruppeIdx);
+        renderMap(resultData);
+
+        // Bind save/cancel
+        document.getElementById('btnSaveEdit').addEventListener('click', saveEdit);
+        document.getElementById('btnCancelEdit').addEventListener('click', cancelEdit);
+    }
+
+    function saveEdit() {
+        if (editGruppeIdx == null || !resultData) return;
+        const g = resultData.gruppen[editGruppeIdx];
+        const allTeams = gruppenContainer._editTeams;
+        if (!allTeams) return;
+
+        // Read new assignments from selects
+        const selects = gruppenContainer.querySelectorAll('.edit-staffel-select');
+        const newAssignments = [];
+        selects.forEach((sel, idx) => {
+            newAssignments.push({
+                team: allTeams[idx].team,
+                newStaffelIdx: parseInt(sel.value),
+            });
+        });
+
+        // Clear all staffeln
+        g.staffeln.forEach(s => {
+            s.teams = [];
+            s.n_teams = 0;
+        });
+
+        // Reassign
+        newAssignments.forEach(({ team, newStaffelIdx }) => {
+            g.staffeln[newStaffelIdx].teams.push(team);
+            g.staffeln[newStaffelIdx].n_teams = g.staffeln[newStaffelIdx].teams.length;
+        });
+
+        // Update n_teams on gruppe
+        g.n_teams = g.staffeln.reduce((s, st) => s + st.n_teams, 0);
+
+        editGruppeIdx = null;
+        renderGruppen(resultData.gruppen);
+        renderMap(resultData);
+        showToast('Änderungen gespeichert', 'success');
+    }
+
+    function cancelEdit() {
+        editGruppeIdx = null;
+        renderGruppen(resultData.gruppen);
+    }
 
     // ─── Toast ───────────────────────────────────────────────
     function showToast(message, type = 'success') {
