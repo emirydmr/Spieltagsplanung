@@ -49,6 +49,7 @@ def parse_wuensche_llm(
     freitext: str,
     mannschaft: str,
     verein: str,
+    saison: str = "",
     provider: str = "ollama",
     model: str = "llama3.1:8b",
     api_base: Optional[str] = None,
@@ -60,6 +61,7 @@ def parse_wuensche_llm(
         freitext: Der Freitext vom Verein
         mannschaft: Mannschaftsname (z.B. "TSV Öhringen 2")
         verein: Vereinsname
+        saison: Saison-String z.B. "2025/26" (Hinrunde Aug-Dez des 1. Jahres)
         provider: "ollama" oder "openai"
         model: Modellname (z.B. "llama3", "gpt-4o-mini", "llama-3.1-8b-instant")
         api_base: Base-URL der API (Standard: Ollama localhost)
@@ -71,8 +73,23 @@ def parse_wuensche_llm(
     if not freitext.strip():
         return VereinsWuensche(mannschaft=mannschaft, verein=verein)
 
+    # Saison-Kontext für korrekte Jahres-Zuordnung
+    saison_hint = ""
+    if saison:
+        try:
+            start_year = int(saison.split("/")[0])
+            saison_hint = (
+                f"\nWICHTIG: Die aktuelle Saison ist {saison}. "
+                f"Hinrunde: August–Dezember {start_year}, "
+                f"Rückrunde: Januar–Juni {start_year + 1}. "
+                f"Wenn ein Datum ohne Jahr genannt wird, benutze {start_year} "
+                f"für Monate Aug-Dez und {start_year + 1} für Jan-Juni."
+            )
+        except (ValueError, IndexError):
+            pass
+
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": SYSTEM_PROMPT + saison_hint},
         {"role": "user", "content": f"Mannschaft: {mannschaft}\nVerein: {verein}\n\nWünsche:\n{freitext}"},
     ]
 

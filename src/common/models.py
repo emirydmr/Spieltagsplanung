@@ -28,6 +28,7 @@ class Mannschaft:
     ms_nr: int  # 1, 2, 3 (1. Mannschaft, 2. Mannschaft, etc.)
     spielstaette: Spielstaette | None = None
     topf: int | None = None  # 1 oder 2
+    wuensche_text: str = ""  # Freitext-Wünsche aus Meldeliste
 
 
 @dataclass

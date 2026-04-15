@@ -760,6 +760,29 @@ table.teams-table {
     background: var(--bg-card);
 }
 
+.spiel-meta {
+    text-align: right;
+    white-space: nowrap;
+    padding-left: 0.5rem;
+}
+
+.spiel-zeit {
+    font-size: 0.75rem;
+    color: var(--accent);
+    font-weight: 600;
+    margin-right: 0.4rem;
+}
+
+.spiel-feld {
+    font-size: 0.7rem;
+    color: var(--text-light);
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
+    vertical-align: middle;
+}
+
 @media (max-width: 768px) {
     .spielplan-content {
         grid-template-columns: 1fr;

@@ -661,10 +661,15 @@
         if (loadingText) loadingText.textContent = 'Spielpläne werden generiert...';
 
         try {
+            // Saison ableiten: Aug-Dez → aktuelles Jahr, Jan-Jul → Vorjahr
+            const now = new Date();
+            const startYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+            const saison = `${startYear}/${(startYear + 1) % 100}`;
+
             const resp = await fetch('/api/spielplan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ einteilung: resultData }),
+                body: JSON.stringify({ einteilung: resultData, saison }),
             });
 
             if (!resp.ok) {
@@ -704,6 +709,9 @@
             : 0;
         const konflikte = plaene.reduce((s, p) => s + (p.score ? p.score.platz_konflikte : 0), 0);
 
+        const wuenscheParsed = data.wuensche_parsed || 0;
+        const wunschVerletzungen = plaene.reduce((s, p) => s + (p.score ? p.score.wunsch_verletzungen : 0), 0);
+
         spStatsRow.innerHTML = `
             <div class="stat-card">
                 <div class="stat-value">${plaene.length}</div>
@@ -718,10 +726,14 @@
                 <div class="stat-label">Spiele</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value" style="color: ${konflikte > 0 ? 'var(--danger)' : 'var(--success)'}">
-                    ${konflikte}
+                <div class="stat-value">${wuenscheParsed}</div>
+                <div class="stat-label">Wünsche erkannt</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" style="color: ${konflikte + wunschVerletzungen > 0 ? 'var(--danger)' : 'var(--success)'}">
+                    ${konflikte + wunschVerletzungen}
                 </div>
-                <div class="stat-label">Platzkonflikte</div>
+                <div class="stat-label">Konflikte</div>
             </div>
         `;
 
@@ -764,11 +776,21 @@
                     : '–';
                 const zeitStr = st.anstosszeit || '';
 
-                const spieleRows = st.spiele.map(s =>
-                    `<tr><td style="text-align:right; padding-right:0.5rem;">${s.heim}</td>
-                     <td style="text-align:center; font-weight:600; color:var(--text-muted);">vs</td>
-                     <td style="padding-left:0.5rem;">${s.gast}</td></tr>`
-                ).join('');
+                const spieleRows = st.spiele.map(s => {
+                    // Per-Spiel Datum/Zeit (falls abweichend vom Spieltag)
+                    const sDatum = s.datum
+                        ? new Date(s.datum).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' })
+                        : '';
+                    const sZeit = s.anstosszeit || '';
+                    const zeitInfo = sZeit ? `<span class="spiel-zeit">${sDatum ? sDatum + ' ' : ''}${sZeit}</span>` : '';
+                    const feldInfo = s.spielfeld ? `<span class="spiel-feld" title="${s.spielfeld}">${s.spielfeld.split(', ').pop()}</span>` : '';
+                    return `<tr>
+                        <td style="text-align:right; padding-right:0.5rem;">${s.heim}</td>
+                        <td style="text-align:center; font-weight:600; color:var(--text-muted);">vs</td>
+                        <td style="padding-left:0.5rem;">${s.gast}</td>
+                        <td class="spiel-meta">${zeitInfo}${feldInfo}</td>
+                    </tr>`;
+                }).join('');
 
                 const spielfreiHtml = st.spielfrei
                     ? `<div class="spielfrei-hint">Spielfrei: ${st.spielfrei}</div>` : '';

@@ -170,6 +170,8 @@ def parse_meldeliste(excel_path: str) -> list[Mannschaft]:
             spielfeld_1 = str(_get(row, col_map, "spielfeld_1", ""))
             spielstaette = _parse_spielstaette_from_spielfeld(spielfeld_1)
 
+        wuensche_text = str(_get(row, col_map, "wuensche", "")).strip()
+
         mannschaften.append(
             Mannschaft(
                 verein_nr=str(verein_nr).strip(),
@@ -182,6 +184,7 @@ def parse_meldeliste(excel_path: str) -> list[Mannschaft]:
                 ms_nr=ms_nr,
                 spielstaette=spielstaette,
                 topf=topf,
+                wuensche_text=wuensche_text,
             )
         )
 

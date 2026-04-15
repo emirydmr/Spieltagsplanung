@@ -23,6 +23,7 @@ from src.staffeleinteilung.algorithmus import gruppiere_mannschaften, einteilung
 from src.staffeleinteilung.scoring import ScoreGewichte
 from src.common.distanz import haversine_km
 from src.spielplanerstellung.wuensche_parser import parse_wuensche_llm
+from src.spielplanerstellung.wuensche import Wunsch
 from src.spielplanerstellung.spielplan import generiere_alle_spielplaene, spielplan_to_dict
 
 app = FastAPI(title="Spieltagsplaner", version="1.0")
@@ -139,6 +140,7 @@ def _staffel_to_dict(mannschaften: list) -> dict:
             "verein_nr": m.verein_nr,
             "region": m.bezirk_alt or "?",
             "topf": m.topf,
+            "wuensche_text": m.wuensche_text or "",
         }
         if m.spielstaette:
             team["spielstaette"] = m.spielstaette.name or ""
@@ -331,14 +333,38 @@ async def api_spielplan(request: Request):
     """Generiert Spielpläne für alle Staffeln aus der Einteilung."""
     data = await request.json()
     einteilung = data.get("einteilung")
+    saison = data.get("saison", "")
     if not einteilung or not einteilung.get("gruppen"):
         raise HTTPException(400, "Keine Einteilung vorhanden")
 
     try:
-        plaene = generiere_alle_spielplaene(einteilung)
+        # Wünsche aus Meldeliste-Freitext parsen (nur Teams die Wünsche haben)
+        wuensche: dict[str, list[Wunsch]] = {}
+        for gruppe in einteilung.get("gruppen", []):
+            for staffel in gruppe.get("staffeln", []):
+                for team in staffel.get("teams", []):
+                    text = team.get("wuensche_text", "").strip()
+                    if not text:
+                        continue
+                    try:
+                        result = parse_wuensche_llm(
+                            freitext=text,
+                            mannschaft=team.get("mannschaft", ""),
+                            verein=team.get("verein", ""),
+                            saison=saison,
+                        )
+                        if result.wuensche:
+                            wuensche[team["mannschaft"]] = result.wuensche
+                    except Exception:
+                        pass  # LLM-Fehler → Wunsch ignorieren
+
+        plaene = generiere_alle_spielplaene(
+            einteilung, wuensche=wuensche if wuensche else None,
+        )
         return JSONResponse({
             "spielplaene": [spielplan_to_dict(p) for p in plaene],
             "total_staffeln": len(plaene),
+            "wuensche_parsed": len(wuensche),
         })
     except Exception as e:
         raise HTTPException(500, f"Fehler bei Spielplan-Generierung: {str(e)}")
