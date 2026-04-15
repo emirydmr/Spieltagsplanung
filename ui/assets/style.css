@@ -676,6 +676,99 @@ table.teams-table {
     to { transform: rotate(360deg); }
 }
 
+/* ─── Spieltagsplanung ─────────────────────────────────────── */
+
+.spielplan-content {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 1.5rem;
+    padding: 0.5rem 0;
+}
+
+.sz-section h4 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.5rem;
+}
+
+.sz-table {
+    font-size: 0.85rem;
+}
+
+.sz-table th, .sz-table td {
+    padding: 0.35rem 0.5rem;
+}
+
+.spieltage-section {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.75rem;
+    align-content: start;
+}
+
+.spieltag-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.spieltag-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+}
+
+.spieltag-nr {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--accent);
+}
+
+.spieltag-datum {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.spiele-table {
+    width: 100%;
+    font-size: 0.85rem;
+    border-collapse: collapse;
+}
+
+.spiele-table td {
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.spiele-table tr:last-child td {
+    border-bottom: none;
+}
+
+.spielfrei-hint {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-style: italic;
+    border-top: 1px solid var(--border);
+    background: var(--bg-card);
+}
+
+@media (max-width: 768px) {
+    .spielplan-content {
+        grid-template-columns: 1fr;
+    }
+    .spieltage-section {
+        grid-template-columns: 1fr;
+    }
+}
+
 .loading-text {
     font-size: 1rem;
     font-weight: 500;

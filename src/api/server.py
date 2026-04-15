@@ -9,9 +9,11 @@ import tempfile
 import shutil
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
@@ -20,6 +22,8 @@ from src.data_import.meldeliste_parser import parse_meldeliste, verknuepfe_koord
 from src.staffeleinteilung.algorithmus import gruppiere_mannschaften, einteilung_erstellen
 from src.staffeleinteilung.scoring import ScoreGewichte
 from src.common.distanz import haversine_km
+from src.spielplanerstellung.wuensche_parser import parse_wuensche_llm
+from src.spielplanerstellung.spielplan import generiere_alle_spielplaene, spielplan_to_dict
 
 app = FastAPI(title="Spieltagsplaner", version="1.0")
 
@@ -168,3 +172,173 @@ def _staffel_to_dict(mannschaften: list) -> dict:
         "max_distanz_km": round(max_dist, 1),
         "doppelrunde": doppelrunde,
     }
+
+
+# ─── Excel Export ──────────────────────────────────────────────
+
+@app.post("/api/export")
+async def api_export(request: Request):
+    """Generiert eine Excel-Datei aus dem Einteilungsergebnis."""
+    data = await request.json()
+    gruppen = data.get("gruppen", [])
+    if not gruppen:
+        raise HTTPException(400, "Keine Gruppen vorhanden")
+
+    wb = Workbook()
+
+    # ── Styles ──
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    header_fill = PatternFill(start_color="C41230", end_color="C41230", fill_type="solid")
+    staffel_font = Font(bold=True, size=11, color="C41230")
+    thin_border = Border(
+        bottom=Side(style="thin", color="E5E7EB"),
+    )
+    center = Alignment(horizontal="center")
+
+    # ── Sheet 1: Übersicht ──
+    ws_ueb = wb.active
+    ws_ueb.title = "Übersicht"
+    ueb_headers = ["Altersklasse", "Topf", "Teams", "Staffeln", "Ø Distanz (km)", "Probleme"]
+    for ci, h in enumerate(ueb_headers, 1):
+        cell = ws_ueb.cell(row=1, column=ci, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center
+
+    for ri, g in enumerate(gruppen, 2):
+        ws_ueb.cell(row=ri, column=1, value=g["altersklasse"])
+        ws_ueb.cell(row=ri, column=2, value=g["topf"])
+        ws_ueb.cell(row=ri, column=3, value=g["n_teams"]).alignment = center
+        ws_ueb.cell(row=ri, column=4, value=len(g["staffeln"])).alignment = center
+        dist = g["score"]["distanz"] if g.get("score") else "-"
+        ws_ueb.cell(row=ri, column=5, value=dist).alignment = center
+        viol = g["score"]["violations"] if g.get("score") else 0
+        ws_ueb.cell(row=ri, column=6, value=viol).alignment = center
+
+    for col in ws_ueb.columns:
+        ws_ueb.column_dimensions[col[0].column_letter].width = 18
+
+    # ── Sheets per Altersklasse/Topf ──
+    for g in gruppen:
+        sheet_name = f"{g['altersklasse']} {g['topf']}"[:31]  # Excel max 31 chars
+        ws = wb.create_sheet(title=sheet_name)
+
+        row = 1
+        for si, staffel in enumerate(g["staffeln"]):
+            # Staffel header
+            label = f"Staffel {si + 1}"
+            if staffel.get("doppelrunde"):
+                label += " (Doppelrunde)"
+            label += f"  —  {staffel['n_teams']} Teams, Max. {staffel['max_distanz_km']} km"
+            cell = ws.cell(row=row, column=1, value=label)
+            cell.font = staffel_font
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
+            row += 1
+
+            # Table headers
+            team_headers = ["Nr.", "Mannschaft", "Verein", "Region", "Ort"]
+            for ci, h in enumerate(team_headers, 1):
+                cell = ws.cell(row=row, column=ci, value=h)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = center
+            row += 1
+
+            # Team rows
+            for ti, t in enumerate(staffel["teams"], 1):
+                ws.cell(row=row, column=1, value=ti).alignment = center
+                ws.cell(row=row, column=2, value=t["mannschaft"])
+                ws.cell(row=row, column=3, value=t.get("verein", ""))
+                ws.cell(row=row, column=4, value=t.get("region", ""))
+                ort = t.get("adresse", "").split(", ")[-1] if t.get("adresse") else ""
+                ws.cell(row=row, column=5, value=ort)
+                for ci in range(1, 6):
+                    ws.cell(row=row, column=ci).border = thin_border
+                row += 1
+
+            row += 1  # empty row between staffeln
+
+        # Column widths
+        ws.column_dimensions["A"].width = 6
+        ws.column_dimensions["B"].width = 30
+        ws.column_dimensions["C"].width = 30
+        ws.column_dimensions["D"].width = 14
+        ws.column_dimensions["E"].width = 22
+
+    # Save to temp file
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    wb.save(tmp.name)
+    tmp.close()
+
+    return FileResponse(
+        tmp.name,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="Staffeleinteilung.xlsx",
+    )
+
+
+# ─── Vereinswünsche LLM Parsing ───────────────────────────────
+
+@app.post("/api/wuensche/parse")
+async def api_parse_wuensche(request: Request):
+    """Freitext-Wünsche per LLM in strukturierte Flags umwandeln."""
+    data = await request.json()
+    freitext = data.get("text", "")
+    mannschaft = data.get("mannschaft", "")
+    verein = data.get("verein", "")
+    provider = data.get("provider", "ollama")
+    model = data.get("model", "llama3")
+    api_base = data.get("api_base")
+    api_key = data.get("api_key")
+
+    if not freitext.strip():
+        raise HTTPException(400, "Kein Text angegeben")
+
+    try:
+        result = parse_wuensche_llm(
+            freitext=freitext,
+            mannschaft=mannschaft,
+            verein=verein,
+            provider=provider,
+            model=model,
+            api_base=api_base,
+            api_key=api_key,
+        )
+        return JSONResponse({
+            "mannschaft": result.mannschaft,
+            "verein": result.verein,
+            "wuensche": [
+                {
+                    "kategorie": w.kategorie.value,
+                    "prioritaet": w.prioritaet.value,
+                    "beschreibung": w.beschreibung,
+                    "datum": w.datum,
+                    "wochentag": w.wochentag,
+                    "uhrzeit": w.uhrzeit,
+                    "bezug_mannschaft": w.bezug_mannschaft,
+                }
+                for w in result.wuensche
+            ],
+        })
+    except Exception as e:
+        raise HTTPException(500, f"LLM-Fehler: {str(e)}")
+
+
+# ─── Spielplan-Generierung ─────────────────────────────────────
+
+@app.post("/api/spielplan")
+async def api_spielplan(request: Request):
+    """Generiert Spielpläne für alle Staffeln aus der Einteilung."""
+    data = await request.json()
+    einteilung = data.get("einteilung")
+    if not einteilung or not einteilung.get("gruppen"):
+        raise HTTPException(400, "Keine Einteilung vorhanden")
+
+    try:
+        plaene = generiere_alle_spielplaene(einteilung)
+        return JSONResponse({
+            "spielplaene": [spielplan_to_dict(p) for p in plaene],
+            "total_staffeln": len(plaene),
+        })
+    except Exception as e:
+        raise HTTPException(500, f"Fehler bei Spielplan-Generierung: {str(e)}")

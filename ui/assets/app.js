@@ -21,6 +21,7 @@
     const btnExpandAll = $('#btnExpandAll');
     const btnCollapseAll = $('#btnCollapseAll');
     const mapGruppeFilter = $('#mapGruppeFilter');
+    const btnExport = $('#btnExport');
 
     // Map
     let map = null;
@@ -118,6 +119,34 @@
         stepResults.style.display = 'none';
         stepUpload.style.display = 'block';
         resultData = null;
+    });
+
+    // ─── Excel Export ────────────────────────────────────────
+    btnExport.addEventListener('click', async () => {
+        if (!resultData) return;
+        try {
+            btnExport.disabled = true;
+            btnExport.textContent = 'Exportiere...';
+            const resp = await fetch('/api/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(resultData),
+            });
+            if (!resp.ok) throw new Error('Export fehlgeschlagen');
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'Staffeleinteilung.xlsx';
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Excel exportiert', 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        } finally {
+            btnExport.disabled = false;
+            btnExport.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Excel Export';
+        }
     });
 
     // ─── Render Results ──────────────────────────────────────
@@ -586,4 +615,221 @@
         toast.className = `toast toast-${type} show`;
         setTimeout(() => { toast.classList.remove('show'); }, 3000);
     }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Spieltagsplanung Tab ────────────────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    const btnGenSpielplan = $('#btnGenSpielplan');
+    const spStatusText = $('#spStatusText');
+    const spStart = $('#sp-start');
+    const spResults = $('#sp-results');
+    const spStatsRow = $('#spStatsRow');
+    const spFilterAk = $('#spFilterAk');
+    const spielplanContainer = $('#spielplanContainer');
+    const btnSpBack = $('#btnSpBack');
+    const btnSpExpandAll = $('#btnSpExpandAll');
+    const btnSpCollapseAll = $('#btnSpCollapseAll');
+
+    let spielplanData = null;
+
+    // Enable generate button when einteilung exists
+    function updateSpielplanStatus() {
+        if (resultData && resultData.gruppen && resultData.gruppen.length > 0) {
+            const n = resultData.gruppen.reduce((s, g) => s + g.staffeln.length, 0);
+            spStatusText.textContent = `Einteilung vorhanden: ${resultData.total_teams} Teams in ${n} Staffeln.`;
+            btnGenSpielplan.disabled = false;
+        } else {
+            spStatusText.textContent = 'Bitte zuerst eine Staffeleinteilung berechnen.';
+            btnGenSpielplan.disabled = true;
+        }
+    }
+
+    // Hook into tab switching to refresh status
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (btn.dataset.tab === 'spieltagsplanung') updateSpielplanStatus();
+        });
+    });
+
+    // Generate Spielplan
+    btnGenSpielplan.addEventListener('click', async () => {
+        if (!resultData) return;
+
+        loading.style.display = 'flex';
+        const loadingText = loading.querySelector('.loading-text');
+        if (loadingText) loadingText.textContent = 'Spielpläne werden generiert...';
+
+        try {
+            const resp = await fetch('/api/spielplan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ einteilung: resultData }),
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.detail || 'Server-Fehler');
+            }
+
+            spielplanData = await resp.json();
+            renderSpielplanResults(spielplanData);
+            spStart.style.display = 'none';
+            spResults.style.display = 'block';
+            showToast(`${spielplanData.total_staffeln} Spielpläne generiert!`, 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        } finally {
+            loading.style.display = 'none';
+            if (loadingText) loadingText.textContent = 'Einteilung wird berechnet...';
+        }
+    });
+
+    // Back button
+    btnSpBack.addEventListener('click', () => {
+        spResults.style.display = 'none';
+        spStart.style.display = 'block';
+    });
+
+    // Render Spielplan results
+    function renderSpielplanResults(data) {
+        const plaene = data.spielplaene;
+
+        // Stats
+        const totalSpiele = plaene.reduce((s, p) =>
+            s + p.spieltage.reduce((ss, st) => ss + st.spiele.length, 0), 0);
+        const totalSpieltage = plaene.reduce((s, p) => s + p.spieltage.length, 0);
+        const avgScore = plaene.filter(p => p.score).length > 0
+            ? plaene.filter(p => p.score).reduce((s, p) => s + p.score.total, 0) / plaene.filter(p => p.score).length
+            : 0;
+        const konflikte = plaene.reduce((s, p) => s + (p.score ? p.score.platz_konflikte : 0), 0);
+
+        spStatsRow.innerHTML = `
+            <div class="stat-card">
+                <div class="stat-value">${plaene.length}</div>
+                <div class="stat-label">Spielpläne</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${totalSpieltage}</div>
+                <div class="stat-label">Spieltage</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${totalSpiele}</div>
+                <div class="stat-label">Spiele</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" style="color: ${konflikte > 0 ? 'var(--danger)' : 'var(--success)'}">
+                    ${konflikte}
+                </div>
+                <div class="stat-label">Platzkonflikte</div>
+            </div>
+        `;
+
+        // AK filter
+        const altersklassen = [...new Set(plaene.map(p => p.altersklasse))].sort();
+        spFilterAk.innerHTML = '<option value="">Alle Altersklassen</option>' +
+            altersklassen.map(ak => `<option value="${ak}">${ak}</option>`).join('');
+
+        renderSpielplaene(plaene);
+    }
+
+    function renderSpielplaene(plaene) {
+        const akFilter = spFilterAk.value;
+        const filtered = akFilter ? plaene.filter(p => p.altersklasse === akFilter) : plaene;
+
+        if (filtered.length === 0) {
+            spielplanContainer.innerHTML = `
+                <div class="empty-state">
+                    <p>Keine Spielpläne gefunden.</p>
+                </div>
+            `;
+            return;
+        }
+
+        spielplanContainer.innerHTML = filtered.map((plan, idx) => {
+            const drBadge = plan.doppelrunde
+                ? '<span class="gruppe-badge badge-gold">Doppelrunde</span>' : '';
+            const scoreBadge = plan.score
+                ? `<span style="color: var(--text-muted); font-weight: 400; font-size: 0.85rem;">Score: ${plan.score.total}</span>` : '';
+
+            // SZ table
+            const szRows = plan.sz_zuordnungen.map(z =>
+                `<tr><td>${z.mannschaft}</td><td style="text-align:center; font-weight:600;">${z.sz}</td></tr>`
+            ).join('');
+
+            // Spieltage
+            const spieltageHtml = plan.spieltage.map(st => {
+                const datumStr = st.datum
+                    ? new Date(st.datum).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })
+                    : '–';
+                const zeitStr = st.anstosszeit || '';
+
+                const spieleRows = st.spiele.map(s =>
+                    `<tr><td style="text-align:right; padding-right:0.5rem;">${s.heim}</td>
+                     <td style="text-align:center; font-weight:600; color:var(--text-muted);">vs</td>
+                     <td style="padding-left:0.5rem;">${s.gast}</td></tr>`
+                ).join('');
+
+                const spielfreiHtml = st.spielfrei
+                    ? `<div class="spielfrei-hint">Spielfrei: ${st.spielfrei}</div>` : '';
+
+                return `
+                    <div class="spieltag-block">
+                        <div class="spieltag-header">
+                            <span class="spieltag-nr">Spieltag ${st.nummer}</span>
+                            <span class="spieltag-datum">${datumStr}${zeitStr ? ' · ' + zeitStr : ''}</span>
+                        </div>
+                        <table class="spiele-table">
+                            <tbody>${spieleRows}</tbody>
+                        </table>
+                        ${spielfreiHtml}
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="gruppe spielplan-gruppe">
+                    <div class="gruppe-header" onclick="toggleGruppe(this)">
+                        <div class="gruppe-title">
+                            <span>${plan.altersklasse} ${plan.topf} – ${plan.staffel_name}</span>
+                            ${drBadge}
+                            <span style="color: var(--text-muted); font-weight: 400; font-size: 0.85rem;">
+                                ${plan.n_teams} Teams · ${plan.spieltage.length} Spieltage
+                            </span>
+                        </div>
+                        <div class="gruppe-meta">
+                            ${scoreBadge}
+                            <span class="gruppe-chevron">▼</span>
+                        </div>
+                    </div>
+                    <div class="gruppe-body">
+                        <div class="spielplan-content">
+                            <div class="sz-section">
+                                <h4>Schlüsselzahlen</h4>
+                                <table class="teams-table sz-table">
+                                    <thead><tr><th>Mannschaft</th><th style="text-align:center;">SZ</th></tr></thead>
+                                    <tbody>${szRows}</tbody>
+                                </table>
+                            </div>
+                            <div class="spieltage-section">
+                                ${spieltageHtml}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    spFilterAk.addEventListener('change', () => {
+        if (spielplanData) renderSpielplaene(spielplanData.spielplaene);
+    });
+
+    btnSpExpandAll.addEventListener('click', () => {
+        document.querySelectorAll('#spielplanContainer .gruppe').forEach(g => g.classList.add('open'));
+    });
+
+    btnSpCollapseAll.addEventListener('click', () => {
+        document.querySelectorAll('#spielplanContainer .gruppe').forEach(g => g.classList.remove('open'));
+    });
 })();
