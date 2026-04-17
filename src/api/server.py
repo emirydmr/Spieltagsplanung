@@ -713,12 +713,28 @@ _SPERR_PATTERN = _re.compile(
     _re.IGNORECASE,
 )
 
+# Sperrtag auch wenn Datum VOR dem Keyword steht:
+# "Am 15.11. kein Heimspiel", "15.11. gesperrt"
+_SPERR_PATTERN2 = _re.compile(
+    r"(?:am\s+)?(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?"
+    r"\s*\.?\s*(?:kein|nicht|gesperrt|fällt|geht nicht|keine)",
+    _re.IGNORECASE,
+)
+
 _DATUM_PATTERN = _re.compile(
     r"(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?",
 )
 
+# Zeit-Pattern: explizit "HH:MM" (mit Doppelpunkt) oder "HH.MM Uhr"
+# NICHT "DD.MM" (Datum) matchen
 _ZEIT_PATTERN = _re.compile(
-    r"(\d{1,2})[:.:](\d{2})\s*(?:uhr)?",
+    r"(\d{1,2}):(\d{2})\s*(?:uhr)?|(\d{1,2})\.(\d{2})\s*uhr",
+    _re.IGNORECASE,
+)
+
+# Explizite Anstoß-/Uhrzeit-Keywords vor einer Zahl
+_ZEIT_KEYWORD_PATTERN = _re.compile(
+    r"(?:anstoß|anstoss|anstoßzeit|uhrzeit|spielbeginn|beginn|ab)\s*(?:um|ab|:)?\s*(\d{1,2})[:.:](\d{2})",
     _re.IGNORECASE,
 )
 
@@ -781,7 +797,10 @@ def _parse_wuensche_fast(
                 # Normalisiere: _x000D_ (Excel-Zeilenumbruch) → Leerzeichen
                 text_clean = text.replace("_x000D_", " ").replace("\r", " ").replace("\n", " ")
 
-                # ── Sperrtage ──
+                # Sammle alle Datums-Positionen (um sie von Uhrzeit-Erkennung auszuschließen)
+                datum_spans: list[tuple[int, int]] = []
+
+                # ── Sperrtage (Pattern 1: "kein/nicht ... DD.MM.") ──
                 for m in _SPERR_PATTERN.finditer(text_clean):
                     day, month = int(m.group(1)), int(m.group(2))
                     year_str = m.group(3)
@@ -799,25 +818,68 @@ def _parse_wuensche_fast(
                             datum=datum.isoformat(),
                             original_text=text,
                         ))
+                        datum_spans.append((m.start(1), m.end()))
                     except ValueError:
                         pass
 
+                # ── Sperrtage (Pattern 2: "DD.MM. kein/nicht ...") ──
+                for m in _SPERR_PATTERN2.finditer(text_clean):
+                    day, month = int(m.group(1)), int(m.group(2))
+                    year_str = m.group(3)
+                    if year_str:
+                        year = int(year_str) if len(year_str) == 4 else 2000 + int(year_str)
+                    else:
+                        year = _resolve_year(month, saison)
+                    try:
+                        from datetime import date
+                        datum = date(year, month, day)
+                        # Vermeid Duplikate
+                        existing = {w.datum for w in wuensche if w.kategorie == WunschKategorie.SPERRTAG}
+                        if datum.isoformat() not in existing:
+                            wuensche.append(Wunsch(
+                                kategorie=WunschKategorie.SPERRTAG,
+                                prioritaet=WunschPrio.HART,
+                                beschreibung=f"Gesperrt am {datum.strftime('%d.%m.%Y')}",
+                                datum=datum.isoformat(),
+                                original_text=text,
+                            ))
+                        datum_spans.append((m.start(1), m.end()))
+                    except ValueError:
+                        pass
+
+                # ── Alle Datums-Positionen sammeln ──
+                for m in _DATUM_PATTERN.finditer(text_clean):
+                    day_val = int(m.group(1))
+                    month_val = int(m.group(2))
+                    if 1 <= day_val <= 31 and 1 <= month_val <= 12:
+                        datum_spans.append((m.start(), m.end()))
+
                 # ── Wochentag-Präferenz ──
                 text_lower = text_clean.lower()
+                seen_wochentage = set()
                 for wt_key, wt_name in _WOCHENTAGE.items():
                     if wt_key in text_lower:
-                        wuensche.append(Wunsch(
-                            kategorie=WunschKategorie.WOCHENTAG,
-                            prioritaet=WunschPrio.WEICH,
-                            beschreibung=f"Bevorzugt {wt_name}",
-                            wochentag=wt_name,
-                            original_text=text,
-                        ))
+                        seen_wochentage.add(wt_name)
 
-                # ── Uhrzeit ──
-                zeit_match = _ZEIT_PATTERN.search(text_clean)
-                if zeit_match:
-                    h, m = int(zeit_match.group(1)), int(zeit_match.group(2))
+                # Wenn mehrere Wochentage genannt: als EINE Präferenz mit allen Tagen speichern
+                for wt_name in seen_wochentage:
+                    wuensche.append(Wunsch(
+                        kategorie=WunschKategorie.WOCHENTAG,
+                        prioritaet=WunschPrio.WEICH,
+                        beschreibung=f"Bevorzugt {wt_name}",
+                        wochentag=wt_name,
+                        original_text=text,
+                    ))
+
+                # ── Uhrzeit (nur wenn nicht innerhalb eines Datums) ──
+                def _in_datum_span(pos: int) -> bool:
+                    return any(s <= pos <= e for s, e in datum_spans)
+
+                zeit_found = False
+                # Erst explizite Keywords prüfen ("Anstoß 14:00")
+                zeit_kw_match = _ZEIT_KEYWORD_PATTERN.search(text_clean)
+                if zeit_kw_match:
+                    h, m = int(zeit_kw_match.group(1)), int(zeit_kw_match.group(2))
                     if 8 <= h <= 21:
                         wuensche.append(Wunsch(
                             kategorie=WunschKategorie.ANSTOSSZEIT,
@@ -826,6 +888,24 @@ def _parse_wuensche_fast(
                             uhrzeit=f"{h:02d}:{m:02d}",
                             original_text=text,
                         ))
+                        zeit_found = True
+
+                if not zeit_found:
+                    zeit_match = _ZEIT_PATTERN.search(text_clean)
+                    if zeit_match:
+                        # Gruppen 1,2 für "HH:MM", Gruppen 3,4 für "HH.MM Uhr"
+                        if zeit_match.group(1) is not None:
+                            h, m = int(zeit_match.group(1)), int(zeit_match.group(2))
+                        else:
+                            h, m = int(zeit_match.group(3)), int(zeit_match.group(4))
+                        if 8 <= h <= 21 and not _in_datum_span(zeit_match.start()):
+                            wuensche.append(Wunsch(
+                                kategorie=WunschKategorie.ANSTOSSZEIT,
+                                prioritaet=WunschPrio.WEICH,
+                                beschreibung=f"Anstoß {h:02d}:{m:02d}",
+                                uhrzeit=f"{h:02d}:{m:02d}",
+                                original_text=text,
+                            ))
 
                 # ── Heim/Auswärts-Beziehung ──
                 if _HEIM_KEYWORDS.search(text_clean) and _AUSW_KEYWORDS.search(text_clean):

@@ -267,11 +267,13 @@ def generiere_alle_spielplaene(
 def _update_platz_konflikte(plaene: list[StaffelSpielplan]) -> None:
     """Zählt verbleibende Spielfeld-Konflikte nach der Auflösung und aktualisiert Scores."""
     from collections import defaultdict
-    belegung: dict[tuple[str, str], list[tuple[int, int, bool, str, str]]] = defaultdict(list)
+    # (start, end, halbfeld, game_name, zeit, staffel_info, ort)
+    belegung: dict[tuple[str, str], list[tuple[int, int, bool, str, str, str, str]]] = defaultdict(list)
 
     for plan in plaene:
         halbfeld = _ist_halbfeld(plan.altersklasse)
         dauer = _get_spieldauer_min(plan.altersklasse)
+        staffel_info = f"{plan.altersklasse} {plan.staffel_name}"
         for st in plan.spieltage:
             for spiel in st.spiele:
                 if not spiel.spielfeld or not spiel.datum:
@@ -279,24 +281,36 @@ def _update_platz_konflikte(plaene: list[StaffelSpielplan]) -> None:
                 key = (spiel.spielfeld.strip().lower(), spiel.datum.isoformat())
                 zeit = _parse_time(spiel.anstosszeit)
                 start = zeit[0] * 60 + zeit[1] if zeit else 720
+                game_name = f"{spiel.heim} vs {spiel.gast}"
+                ort = spiel.spielfeld.split(", ")[-1] if ", " in spiel.spielfeld else spiel.spielfeld
                 belegung[key].append((start, start + dauer, halbfeld,
-                                      f"{spiel.heim} vs {spiel.gast}",
-                                      spiel.anstosszeit or "?"))
+                                      game_name, spiel.anstosszeit or "?",
+                                      staffel_info, ort))
 
-    # Konflikte pro (feld, datum) mit Details
-    remaining: dict[tuple[str, str], list[str]] = {}
-    for key, entries in belegung.items():
+    # Build per-game conflict details: game_name → [detail_dict, ...]
+    game_conflicts: dict[str, list[dict]] = defaultdict(list)
+    for (feld, datum), entries in belegung.items():
         entries.sort()
-        details: list[str] = []
         for i in range(len(entries)):
             for j in range(i + 1, len(entries)):
-                s_i, e_i, hf_i, name_i, zeit_i = entries[i]
-                s_j, e_j, hf_j, name_j, zeit_j = entries[j]
+                s_i, e_i, hf_i, name_i, zeit_i, staffel_i, ort_i = entries[i]
+                s_j, e_j, hf_j, name_j, zeit_j, staffel_j, ort_j = entries[j]
                 if s_j < e_i:
                     if hf_i and hf_j and s_i == s_j:
                         continue
-                    details.append(f"Zeitüberlappung: {name_i} ({zeit_i}) & {name_j} ({zeit_j})")
-        remaining[key] = details
+                    # Register conflict for both games
+                    game_conflicts[name_i].append({
+                        "datum": datum,
+                        "ort": ort_i,
+                        "spiel": name_i,
+                        "grund": f"Zeitüberlappung mit {name_j} ({zeit_j}, {staffel_j})",
+                    })
+                    game_conflicts[name_j].append({
+                        "datum": datum,
+                        "ort": ort_j,
+                        "spiel": name_j,
+                        "grund": f"Zeitüberlappung mit {name_i} ({zeit_i}, {staffel_i})",
+                    })
 
     for plan in plaene:
         if not plan.score:
@@ -305,18 +319,11 @@ def _update_platz_konflikte(plaene: list[StaffelSpielplan]) -> None:
         plan.score.platz_konflikt_details = []
         for st in plan.spieltage:
             for spiel in st.spiele:
-                if not spiel.spielfeld or not spiel.datum:
-                    continue
-                key = (spiel.spielfeld.strip().lower(), spiel.datum.isoformat())
-                if remaining.get(key):
+                game_name = f"{spiel.heim} vs {spiel.gast}"
+                conflicts = game_conflicts.get(game_name, [])
+                if conflicts:
                     plan.score.platz_konflikte += 1
-                    detail = remaining[key].pop(0)
-                    ort = spiel.spielfeld.split(", ")[-1] if ", " in spiel.spielfeld else spiel.spielfeld
-                    plan.score.platz_konflikt_details.append({
-                        "datum": spiel.datum.isoformat(),
-                        "ort": ort,
-                        "grund": detail,
-                    })
+                    plan.score.platz_konflikt_details.extend(conflicts)
         plan.score.berechne_total()
 
 
@@ -324,8 +331,13 @@ def _update_wunsch_verletzungen(
     plaene: list[StaffelSpielplan],
     wuensche: dict[str, list[Wunsch]],
 ) -> None:
-    """Berechnet Wunsch-Verletzungen neu basierend auf tatsächlichen Spiel-Daten nach CP-SAT."""
+    """Berechnet Wunsch-Verletzungen neu basierend auf tatsächlichen Spiel-Daten nach CP-SAT.
+
+    Wochentag-Wünsche: Zählt nur Spiele als Verletzung, bei denen der bevorzugte
+    Tag innerhalb derselben KW erreichbar war (±3 Tage vom Spieltag-Datum).
+    """
     from src.spielplanerstellung.wuensche import WunschKategorie, WunschPrio
+    from datetime import timedelta
 
     _WT_MAP = {
         "montag": 0, "dienstag": 1, "mittwoch": 2, "donnerstag": 3,
@@ -338,13 +350,16 @@ def _update_wunsch_verletzungen(
         if not plan.score:
             continue
 
-        team_games: dict[str, list[tuple[date, str]]] = {}
+        # (datum, rolle, heim, gast, anstosszeit, spieltag_datum)
+        team_games: dict[str, list[tuple[date, str, str, str, str, date | None]]] = {}
         for st in plan.spieltage:
             for spiel in st.spiele:
                 if not spiel.datum:
                     continue
-                team_games.setdefault(spiel.heim, []).append((spiel.datum, "heim"))
-                team_games.setdefault(spiel.gast, []).append((spiel.datum, "gast"))
+                team_games.setdefault(spiel.heim, []).append(
+                    (spiel.datum, "heim", spiel.heim, spiel.gast, spiel.anstosszeit, st.datum))
+                team_games.setdefault(spiel.gast, []).append(
+                    (spiel.datum, "gast", spiel.heim, spiel.gast, spiel.anstosszeit, st.datum))
 
         violations = 0
         details: list[dict] = []
@@ -359,12 +374,14 @@ def _update_wunsch_verletzungen(
                         sperr = date.fromisoformat(w.datum)
                     except (ValueError, TypeError):
                         continue
-                    for g_datum, _ in games:
+                    for g_datum, rolle, heim, gast, zeit, st_datum in games:
                         if g_datum == sperr:
                             violations += pen
                             details.append({
                                 "team": mannschaft,
                                 "typ": "Sperrtag",
+                                "datum": g_datum.isoformat(),
+                                "spiel": f"{heim} vs {gast}",
                                 "grund": f"Spiel am {sperr.strftime('%d.%m.%Y')} trotz Sperrtag",
                             })
                             break
@@ -373,13 +390,51 @@ def _update_wunsch_verletzungen(
                     gewuenscht = _WT_MAP.get(w.wochentag.strip().lower())
                     if gewuenscht is None:
                         continue
-                    for g_datum, _ in games:
-                        if g_datum.weekday() != gewuenscht:
+
+                    for g_datum, rolle, heim, gast, zeit, st_datum in games:
+                        if g_datum.weekday() == gewuenscht:
+                            continue  # Wunsch erfüllt
+
+                        # Prüfe ob der gewünschte Wochentag in ±2 Tagen erreichbar war
+                        # (Solver kann Fr/Sa/So verschieben = max ±2 Tage)
+                        ref = st_datum or g_datum
+                        diff = gewuenscht - ref.weekday()
+                        if diff > 3:
+                            diff -= 7
+                        elif diff < -3:
+                            diff += 7
+
+                        if abs(diff) <= 2:
                             violations += pen
                             details.append({
                                 "team": mannschaft,
                                 "typ": "Wochentag",
+                                "datum": g_datum.isoformat(),
+                                "spiel": f"{heim} vs {gast}",
                                 "grund": f"Spiel am {_WT_NAMES[g_datum.weekday()]} {g_datum.strftime('%d.%m.')} statt {w.wochentag}",
+                            })
+
+                elif w.kategorie == WunschKategorie.ANSTOSSZEIT and w.uhrzeit:
+                    parts = w.uhrzeit.replace(":", ".").split(".")
+                    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                        wunsch_min = int(parts[0]) * 60 + int(parts[1])
+                    else:
+                        continue
+                    for g_datum, rolle, heim, gast, anstosszeit, st_datum in games:
+                        zeit_parts = (anstosszeit or "").replace(":", ".").split(".")
+                        if len(zeit_parts) == 2 and zeit_parts[0].isdigit() and zeit_parts[1].isdigit():
+                            actual_min = int(zeit_parts[0]) * 60 + int(zeit_parts[1])
+                        else:
+                            continue
+                        diff = abs(actual_min - wunsch_min)
+                        if diff > 30:
+                            violations += pen
+                            details.append({
+                                "team": mannschaft,
+                                "typ": "Anstoßzeit",
+                                "datum": g_datum.isoformat(),
+                                "spiel": f"{heim} vs {gast}",
+                                "grund": f"Anstoß {anstosszeit} statt gewünscht {w.uhrzeit}",
                             })
 
                 elif w.kategorie == WunschKategorie.HEIMWUNSCH and w.datum:
@@ -387,12 +442,14 @@ def _update_wunsch_verletzungen(
                         wunsch_date = date.fromisoformat(w.datum)
                     except (ValueError, TypeError):
                         continue
-                    for g_datum, rolle in games:
+                    for g_datum, rolle, heim, gast, zeit, st_datum in games:
                         if g_datum == wunsch_date and rolle != "heim":
                             violations += pen
                             details.append({
                                 "team": mannschaft,
                                 "typ": "Heimwunsch",
+                                "datum": g_datum.isoformat(),
+                                "spiel": f"{heim} vs {gast}",
                                 "grund": f"Auswärts statt Heim am {wunsch_date.strftime('%d.%m.%Y')}",
                             })
 
@@ -401,12 +458,14 @@ def _update_wunsch_verletzungen(
                         wunsch_date = date.fromisoformat(w.datum)
                     except (ValueError, TypeError):
                         continue
-                    for g_datum, rolle in games:
+                    for g_datum, rolle, heim, gast, zeit, st_datum in games:
                         if g_datum == wunsch_date and rolle != "gast":
                             violations += pen
                             details.append({
                                 "team": mannschaft,
                                 "typ": "Auswärtswunsch",
+                                "datum": g_datum.isoformat(),
+                                "spiel": f"{heim} vs {gast}",
                                 "grund": f"Heim statt Auswärts am {wunsch_date.strftime('%d.%m.%Y')}",
                             })
 

@@ -141,8 +141,8 @@ _PENALTY_ALT_WEEKDAY  = 30   # Ausweichen auf Wochentag
 _PENALTY_SWAP         = 20   # Heim/Auswärts-Tausch
 _PENALTY_TIME_PER_15  = 1    # je 15 min Abweichung von Wunschzeit
 _PENALTY_SPERRTAG     = 200  # Spiel auf Sperrtag (hart: verboten, weich: Strafe)
-_PENALTY_WOCHENTAG    = 80   # Spiel nicht am Wunschwochentag (pro Team)
-_BONUS_WOCHENTAG      = -20  # Bonus für Treffen des Wunschwochentags
+_PENALTY_WOCHENTAG    = 150  # Spiel nicht am Wunschwochentag (pro Team)
+_BONUS_WOCHENTAG      = -40  # Bonus für Treffen des Wunschwochentags
 
 
 # ─── Solver ────────────────────────────────────────────────────
@@ -162,7 +162,8 @@ def solve_game_slots(
 ) -> int:
     """Weist allen Spielen konfliktfreie Slots zu (CP-SAT).
 
-    Löst pro Primärdatum separat (kleinere Teilprobleme → schneller).
+    Löst pro Wochenend-Cluster (Fr+Sa+So derselben KW) separat, damit
+    Verschiebungen zwischen Tagen korrekt gegen Venue-Konflikte abgewogen werden.
 
     Returns:
         Anzahl geänderter Spiele.
@@ -179,29 +180,44 @@ def solve_game_slots(
     # Nur Spiele mit gültigen Optionen
     all_games = [g for g in all_games if g.options]
 
-    # Gruppiere nach Primärdatum (Spiele am selben Tag konkurrieren)
+    # Gruppiere nach Wochenend-Cluster (ISO-Woche, damit Fr+Sa+So zusammen sind)
+    # Alle Daten die ein Spiel erreichen kann bestimmen den Cluster
     from collections import defaultdict
-    by_date: dict[date, list[_GameInfo]] = defaultdict(list)
+
+    def _week_key(dt: date) -> tuple[int, int]:
+        """(iso_year, iso_week) – Fr/Sa/So fallen in dieselbe Woche."""
+        return dt.isocalendar()[:2]
+
+    by_week: dict[tuple[int, int], list[_GameInfo]] = defaultdict(list)
     for g in all_games:
-        by_date[g.spiel.datum].append(g)
+        # Cluster = die Wochen aller möglichen Optionen des Spiels
+        weeks = set()
+        for opt in g.options:
+            weeks.add(_week_key(opt.date))
+        # Spiel der frühesten Woche zuordnen (Primärdatum)
+        primary_week = _week_key(g.spiel.datum)
+        by_week[primary_week].append(g)
 
     total_changes = 0
-    n_groups = len(by_date)
+    n_groups = len(by_week)
 
-    print(f"[CP-SAT] {len(all_games)} Spiele in {n_groups} Datumsgruppen")
+    print(f"[CP-SAT] {len(all_games)} Spiele in {n_groups} Wochen-Clustern")
 
-    # Zeit pro Gruppe proportional zum Gesamt-Limit
-    per_group_limit = max(5, time_limit_seconds // max(n_groups, 1))
+    # Zeit pro Cluster proportional zum Gesamt-Limit (größere Cluster = mehr Zeit)
+    total_games = len(all_games)
+    for i, (wk, games) in enumerate(sorted(by_week.items())):
+        # Proportionale Zeitverteilung: größere Cluster bekommen mehr
+        cluster_limit = max(5, int(time_limit_seconds * len(games) / max(total_games, 1)))
+        cluster_limit = min(cluster_limit, 30)  # Cap bei 30s pro Cluster
 
-    for i, (dt, games) in enumerate(sorted(by_date.items())):
         model = cp_model.CpModel()
         _build_model(model, games)
-        changes = _solve_and_apply(model, games, per_group_limit)
+        changes = _solve_and_apply(model, games, cluster_limit)
         total_changes += changes
 
-        if (i + 1) % 5 == 0 or i == n_groups - 1:
-            print(f"[CP-SAT] Gruppe {i+1}/{n_groups}: "
-                  f"{dt} ({len(games)} Spiele, {changes} Änderungen)")
+        if (i + 1) % 3 == 0 or i == n_groups - 1:
+            print(f"[CP-SAT] Cluster {i+1}/{n_groups}: "
+                  f"KW {wk[1]}/{wk[0]} ({len(games)} Spiele, {changes} Änd., {cluster_limit}s)")
 
     # ── Zweiter Pass: Repariere cross-date Konflikte ──────────
     repair_changes = _repair_cross_date_conflicts(plaene, wuensche, time_limit_seconds=30)
@@ -331,10 +347,17 @@ def _generate_options(
             if sperr_prio == WunschPrio.WEICH:
                 date_pen += _PENALTY_SPERRTAG
 
-            # Wunschwochentag: Strafe wenn nicht getroffen, Bonus wenn getroffen
+            # Wunschwochentag: Strafe PRO Team das den Tag wünscht
             if wunsch_wochentage:
                 if dt.weekday() not in wunsch_wochentage:
-                    date_pen += _PENALTY_WOCHENTAG
+                    # Zähle wie viele Teams diesen Wochentag wünschen
+                    n_wishing = 0
+                    for w in heim_w + gast_w:
+                        if w.kategorie == WunschKategorie.WOCHENTAG and w.wochentag:
+                            wd_nr = _WOCHENTAG_MAP.get(w.wochentag.lower())
+                            if wd_nr is not None and dt.weekday() != wd_nr:
+                                n_wishing += 1
+                    date_pen += _PENALTY_WOCHENTAG * max(n_wishing, 1)
                 else:
                     date_pen += _BONUS_WOCHENTAG  # negativ = Bonus
 

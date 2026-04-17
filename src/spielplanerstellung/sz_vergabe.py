@@ -254,7 +254,11 @@ def _check_wochentag(
     spieltag_dates: dict[int, date] | None,
     penalty: int,
 ) -> int:
-    """Prüft ob Spieltage am bevorzugten Wochentag liegen."""
+    """Prüft ob Spieltage am bevorzugten Wochentag liegen.
+
+    Nur Spiele zählen, bei denen der bevorzugte Wochentag innerhalb ±3 Tage
+    erreichbar wäre (CP-SAT kann Fr/Sa/So innerhalb einer KW verschieben).
+    """
     if not spieltag_dates or not w.wochentag:
         return 0
     gewuenscht = WOCHENTAG_MAP.get(w.wochentag.strip().lower())
@@ -266,7 +270,16 @@ def _check_wochentag(
         rolle = team_rolle.get(st_nr, {}).get(sz)
         if rolle is None:
             continue
-        if dt.weekday() != gewuenscht:
+        if dt.weekday() == gewuenscht:
+            continue  # Wunsch erfüllt
+        # Prüfe ob gewünschter Tag in ±2 Tagen erreichbar wäre
+        # (Solver kann Fr/Sa/So verschieben = max ±2 Tage)
+        diff = gewuenscht - dt.weekday()
+        if diff > 3:
+            diff -= 7
+        elif diff < -3:
+            diff += 7
+        if abs(diff) <= 2:
             violations += penalty
     return violations
 
