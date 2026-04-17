@@ -67,8 +67,11 @@ class _GameInfo:
 
 # ─── Alternative Termine ───────────────────────────────────────
 
-def _get_alternative_dates(primary: date) -> list[tuple[date, str]]:
+def _get_alternative_dates(primary: date, wunsch_wochentage: set[int] | None = None) -> list[tuple[date, str]]:
     """Gibt alternative Spieltage in derselben KW zurück.
+
+    Wenn wunsch_wochentage angegeben, wird auch der gewünschte Wochentag
+    als Alternative hinzugefügt (falls nicht schon enthalten).
 
     Returns:
         [(datum, typ)] wobei typ ∈ {'primary', 'weekend', 'weekday'}
@@ -92,6 +95,22 @@ def _get_alternative_dates(primary: date) -> list[tuple[date, str]]:
         # Samstag derselben Woche
         days_to_sat = 5 - wd
         result.append((primary + timedelta(days=days_to_sat), "weekend"))
+
+    # Wunsch-Wochentage als Extra-Optionen (wenn nicht schon enthalten)
+    if wunsch_wochentage:
+        existing_wds = {dt.weekday() for dt, _ in result}
+        for target_wd in wunsch_wochentage:
+            if target_wd in existing_wds:
+                continue
+            # Berechne nächsten Tag mit diesem Wochentag in derselben KW (±3 Tage)
+            diff = target_wd - wd
+            if diff > 3:
+                diff -= 7
+            elif diff < -3:
+                diff += 7
+            candidate = primary + timedelta(days=diff)
+            dt_type = "weekend" if target_wd >= 5 else "weekday"
+            result.append((candidate, dt_type))
 
     return result
 
@@ -252,7 +271,6 @@ def _generate_options(
 
     for g in games:
         primary_date = g.spiel.datum
-        alt_dates = _get_alternative_dates(primary_date)
 
         # Wünsche für Heim- und Gast-Team sammeln
         heim_w = wuensche.get(g.spiel.heim, [])
@@ -274,6 +292,9 @@ def _generate_options(
                 wd_nr = _WOCHENTAG_MAP.get(w.wochentag.lower())
                 if wd_nr is not None:
                     wunsch_wochentage.add(wd_nr)
+
+        # Alternative Termine inkl. Wunsch-Wochentage
+        alt_dates = _get_alternative_dates(primary_date, wunsch_wochentage or None)
 
         # Wunsch-Anstoßzeit extrahieren (Heim- UND Gast-Team)
         wunsch_zeit_min: int | None = None

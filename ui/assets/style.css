@@ -1044,6 +1044,62 @@ table.teams-table {
     border-left: 3px solid var(--accent);
 }
 
+.spiel-row-conflict-platz {
+    background: rgba(220, 38, 38, 0.08) !important;
+    border-left: 3px solid var(--danger);
+}
+
+.spiel-row-conflict-wunsch {
+    background: rgba(217, 119, 6, 0.06) !important;
+    border-left: 3px solid var(--warning);
+}
+
+/* Tooltip popup for badges */
+.tooltip-trigger {
+    position: relative;
+    cursor: help;
+}
+
+.tooltip-popup {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 1000;
+    min-width: 320px;
+    max-width: 480px;
+    max-height: 300px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.15);
+    padding: 0.5rem;
+    font-size: 0.78rem;
+    font-weight: 400;
+    line-height: 1.4;
+    text-align: left;
+    white-space: normal;
+}
+
+.tooltip-trigger:hover .tooltip-popup {
+    display: block;
+}
+
+.tooltip-line {
+    padding: 3px 6px;
+    border-radius: 4px;
+    margin-bottom: 2px;
+}
+
+.tooltip-line-red {
+    color: var(--danger);
+}
+
+.tooltip-line-orange {
+    color: #b45309;
+}
+
 @media (max-width: 768px) {
     .spiel-list-header,
     .spiel-row {

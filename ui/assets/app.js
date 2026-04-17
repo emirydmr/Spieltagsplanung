@@ -785,15 +785,21 @@
             const platzDetails = (plan.score && plan.score.platz_konflikt_details) || [];
             const wunschDetails = (plan.score && plan.score.wunsch_details) || [];
 
+            // Build sets of conflicted teams/games for highlighting
+            const conflictedTeams = new Set();
+            platzDetails.forEach(d => { if (d.teams) d.teams.forEach(t => conflictedTeams.add(t)); });
+            const wunschTeams = new Set();
+            wunschDetails.forEach(d => { if (d.team) wunschTeams.add(d.team); });
+
             const badges = [];
             if (konflikte > 0) {
-                const platzTooltip = platzDetails.map(d => `${d.ort}: ${d.grund}`).join('\n');
-                badges.push(`<span class="gruppe-badge badge-red" title="${platzTooltip.replace(/"/g, '&quot;')}" style="cursor:help">${konflikte} Platz-Konflikt${konflikte !== 1 ? 'e' : ''}</span>`);
+                const platzLines = platzDetails.map(d => `<div class="tooltip-line tooltip-line-red">⚠ ${d.ort}: ${d.grund}</div>`).join('');
+                badges.push(`<span class="gruppe-badge badge-red tooltip-trigger">${konflikte} Platz-Konflikt${konflikte !== 1 ? 'e' : ''}<div class="tooltip-popup">${platzLines}</div></span>`);
             }
             if (wunschV > 0) {
-                const wunschTooltip = wunschDetails.slice(0, 20).map(d => `${d.team}: ${d.grund}`).join('\n')
-                    + (wunschDetails.length > 20 ? `\n... und ${wunschDetails.length - 20} weitere` : '');
-                badges.push(`<span class="gruppe-badge badge-orange" title="${wunschTooltip.replace(/"/g, '&quot;')}" style="cursor:help">${wunschV} Wunsch-Verl.</span>`);
+                const wunschLines = wunschDetails.slice(0, 25).map(d => `<div class="tooltip-line tooltip-line-orange">● ${d.team}: ${d.grund}</div>`).join('')
+                    + (wunschDetails.length > 25 ? `<div class="tooltip-line" style="color:var(--text-muted)">... und ${wunschDetails.length - 25} weitere</div>` : '');
+                badges.push(`<span class="gruppe-badge badge-orange tooltip-trigger">${wunschV} Wunsch-Verl.<div class="tooltip-popup">${wunschLines}</div></span>`);
             }
             if (badges.length === 0) badges.push(`<span class="gruppe-badge badge-ok">Keine Konflikte</span>`);
             const problemBadge = badges.join(' ');
@@ -807,8 +813,26 @@
                 const spieleRows = st.spiele.map((s, si) => {
                     const sZeit = s.anstosszeit || '–';
                     const ort = s.spielfeld ? s.spielfeld.split(', ').pop() : '–';
+                    // Check if this game has a conflict
+                    const hasPlatzConflict = platzDetails.some(d =>
+                        d.grund && (d.grund.includes(s.heim) || d.grund.includes(s.gast)));
+                    const hasWunschConflict = wunschTeams.has(s.heim) || wunschTeams.has(s.gast);
+                    const conflictClass = hasPlatzConflict ? ' spiel-row-conflict-platz' :
+                        hasWunschConflict ? ' spiel-row-conflict-wunsch' : '';
+                    // Build per-game tooltip
+                    let gameTooltips = [];
+                    platzDetails.forEach(d => {
+                        if (d.grund && (d.grund.includes(s.heim) || d.grund.includes(s.gast)))
+                            gameTooltips.push('⚠ ' + d.grund);
+                    });
+                    wunschDetails.forEach(d => {
+                        if (d.team === s.heim || d.team === s.gast)
+                            gameTooltips.push('● ' + d.team + ': ' + d.grund);
+                    });
+                    const tooltipAttr = gameTooltips.length > 0
+                        ? ` title="${gameTooltips.join('\n').replace(/"/g, '&quot;')}"` : '';
                     return `
-                        <div class="spiel-row" data-staffel="${plan.staffel_idx}" data-st="${st.nummer}" data-si="${si}">
+                        <div class="spiel-row${conflictClass}" data-staffel="${plan.staffel_idx}" data-st="${st.nummer}" data-si="${si}"${tooltipAttr}>
                             <div class="spiel-zeit-col">${sZeit}</div>
                             <div class="spiel-paarung">
                                 <span class="spiel-heim">${s.heim}</span>
