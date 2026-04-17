@@ -1,64 +1,74 @@
-"""Test Wünsche-Integration in Spielplan-Generierung."""
-import requests
+"""Test: CP-SAT mit Wuenschen (Sperrtag + Wochentag)."""
+from datetime import date
+from src.spielplanerstellung.spielplan import StaffelSpielplan, Spieltag, Spiel
+from src.spielplanerstellung.sz_vergabe import SZZuordnung, SpielplanScore
+from src.spielplanerstellung.slot_solver import solve_game_slots
+from src.spielplanerstellung.wuensche import Wunsch, WunschKategorie, WunschPrio
 
-test = {
-    "saison": "2025/26",
-    "einteilung": {
-        "total_teams": 6,
-        "gruppen": [{
-            "altersklasse": "C-Junioren",
-            "spielklasse": "Qualistaffel",
-            "topf": "Topf 1",
-            "n_teams": 6,
-            "staffeln": [{
-                "n_teams": 6,
-                "doppelrunde": False,
-                "max_distanz_km": 20.0,
-                "teams": [
-                    {"mannschaft": "TSV Ilshofen", "verein": "TSV Ilshofen", "region": "Hohenlohe",
-                     "lat": 49.17, "lon": 9.92, "adresse": "Sportplatz, 74532 Ilshofen",
-                     "wuensche_text": "Am 4. Oktober können wir nicht spielen (Vereinsfest)"},
-                    {"mannschaft": "TSV Crailsheim", "verein": "TSV Crailsheim", "region": "Hohenlohe",
-                     "lat": 49.13, "lon": 10.07, "adresse": "Stadion, 74564 Crailsheim",
-                     "wuensche_text": ""},
-                    {"mannschaft": "SV Westheim", "verein": "SV Westheim", "region": "Hohenlohe",
-                     "lat": 49.08, "lon": 10.05, "adresse": "Sportplatz, 74538 Westheim",
-                     "wuensche_text": "Wir spielen am liebsten samstags"},
-                    {"mannschaft": "FC Langenburg", "verein": "FC Langenburg", "region": "Hohenlohe",
-                     "lat": 49.25, "lon": 9.85, "adresse": "Sportplatz, 74595 Langenburg",
-                     "wuensche_text": ""},
-                    {"mannschaft": "TSG Schwäbisch Hall", "verein": "TSG Schwäbisch Hall", "region": "Hohenlohe",
-                     "lat": 49.11, "lon": 9.74, "adresse": "Sportplatz, 74523 Schwäbisch Hall",
-                     "wuensche_text": ""},
-                    {"mannschaft": "TV Braunsbach", "verein": "TV Braunsbach", "region": "Hohenlohe",
-                     "lat": 49.20, "lon": 9.79, "adresse": "Sportplatz, 74542 Braunsbach",
-                     "wuensche_text": "Am 1. Spieltag bitte Heimspiel"},
-                ]
-            }],
-            "score": {"total": 10, "distanz": 12.5, "region": 0, "balance": 0.1, "violations": 0},
-            "merged": False,
-        }]
-    }
+VENUE = "Sportplatz Musterstadt"
+DATUM = date(2025, 9, 20)  # Samstag
+
+sz = [
+    SZZuordnung(mannschaft="Team A", verein="FC A", sz=1, adresse=VENUE),
+    SZZuordnung(mannschaft="Team B", verein="FC B", sz=2, adresse=VENUE),
+    SZZuordnung(mannschaft="Team C", verein="FC C", sz=3, adresse="Platz 2"),
+    SZZuordnung(mannschaft="Team D", verein="FC D", sz=4, adresse="Platz 2"),
+]
+
+spiele = [
+    Spiel(heim="Team A", gast="Team B", datum=DATUM, anstosszeit="14:15", spielfeld=VENUE),
+    Spiel(heim="Team C", gast="Team D", datum=DATUM, anstosszeit="14:15", spielfeld="Platz 2"),
+]
+
+plaene = [StaffelSpielplan(
+    staffel_name="Test", altersklasse="C-Junioren", topf="T1",
+    staffel_idx=0, n_teams=4, doppelrunde=False,
+    sz_zuordnungen=sz, spieltage=[Spieltag(nummer=1, datum=DATUM, anstosszeit="14:15", spiele=spiele)],
+    score=SpielplanScore(),
+)]
+
+# Wuensche: Team A hat harten Sperrtag am 20.09.
+wuensche = {
+    "Team A": [
+        Wunsch(
+            kategorie=WunschKategorie.SPERRTAG,
+            prioritaet=WunschPrio.HART,
+            beschreibung="Sperrtag 20.09.",
+            datum="2025-09-20",
+            original_text="20.09. gesperrt",
+        ),
+    ],
+    "Team C": [
+        Wunsch(
+            kategorie=WunschKategorie.WOCHENTAG,
+            prioritaet=WunschPrio.WEICH,
+            beschreibung="Bevorzugt Sonntag",
+            wochentag="Sonntag",
+            original_text="Wir spielen lieber sonntags",
+        ),
+    ],
 }
 
-resp = requests.post("http://127.0.0.1:8000/api/spielplan", json=test, timeout=120)
-print(f"Status: {resp.status_code}")
+print("VOR CP-SAT:")
+for s in spiele:
+    print(f"  {s.datum} {s.anstosszeit} {s.heim} vs {s.gast} @ {s.spielfeld}")
 
-if resp.status_code != 200:
-    print(f"Error: {resp.text}")
-else:
-    data = resp.json()
-    print(f"Staffeln: {data['total_staffeln']}")
-    print(f"Wünsche geparst: {data['wuensche_parsed']}")
-    sp = data["spielplaene"][0]
-    print(f"\n{sp['staffel_name']} - {sp['altersklasse']} - {sp['n_teams']} Teams")
-    print(f"Score: {sp['score']}")
-    print(f"\nSZ-Zuordnung:")
-    for z in sp["sz_zuordnungen"]:
-        print(f"  SZ {z['sz']}: {z['mannschaft']}")
-    print(f"\nSpieltage:")
-    for st in sp["spieltage"]:
-        sf = f" [Spielfrei: {st['spielfrei']}]" if st.get("spielfrei") else ""
-        print(f"  ST {st['nummer']}: {st['datum']} {st['anstosszeit']}{sf}")
-        for s in st["spiele"]:
-            print(f"    {s['heim']} vs {s['gast']}")
+changes = solve_game_slots(plaene, wuensche=wuensche, time_limit_seconds=10)
+
+print(f"\nNACH CP-SAT ({changes} Aenderungen):")
+for p in plaene:
+    for st in p.spieltage:
+        for s in st.spiele:
+            print(f"  {s.datum} {s.anstosszeit} {s.heim} vs {s.gast} @ {s.spielfeld}")
+
+# Pruefe Sperrtag: Team A darf NICHT am 20.09. spielen
+sperrtag_ok = True
+for p in plaene:
+    for st in p.spieltage:
+        for s in st.spiele:
+            if ("Team A" in (s.heim, s.gast)) and s.datum == date(2025, 9, 20):
+                print("\n!!! FEHLER: Team A spielt trotz Sperrtag am 20.09. !!!")
+                sperrtag_ok = False
+
+if sperrtag_ok:
+    print("\nOK: Team A spielt NICHT am 20.09. (Sperrtag respektiert)")
