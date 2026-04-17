@@ -257,6 +257,10 @@ def generiere_alle_spielplaene(
     # Zähle verbleibende Konflikte (sollte 0 oder nahe 0 sein)
     _update_platz_konflikte(alle_plaene)
 
+    # Wunsch-Verletzungen nach CP-SAT neu berechnen (basierend auf tatsächlichem spiel.datum)
+    if wuensche:
+        _update_wunsch_verletzungen(alle_plaene, wuensche)
+
     return alle_plaene
 
 
@@ -308,6 +312,84 @@ def _update_platz_konflikte(plaene: list[StaffelSpielplan]) -> None:
                 if remaining.get(key, 0) > 0:
                     plan.score.platz_konflikte += 1
                     remaining[key] -= 1
+        plan.score.berechne_total()
+
+
+def _update_wunsch_verletzungen(
+    plaene: list[StaffelSpielplan],
+    wuensche: dict[str, list[Wunsch]],
+) -> None:
+    """Berechnet Wunsch-Verletzungen neu basierend auf tatsächlichen Spiel-Daten nach CP-SAT.
+
+    Die SZ-Vergabe berechnet Wunsch-Verletzungen gegen Spieltag-Daten (vor CP-SAT).
+    Nach CP-SAT haben Spiele ggf. andere Daten (z.B. verschoben von Sonntag auf Samstag).
+    Diese Funktion prüft gegen die tatsächlichen spiel.datum-Werte.
+    """
+    from src.spielplanerstellung.wuensche import WunschKategorie, WunschPrio
+
+    _WT_MAP = {
+        "montag": 0, "dienstag": 1, "mittwoch": 2, "donnerstag": 3,
+        "freitag": 4, "samstag": 5, "sonntag": 6,
+        "mo": 0, "di": 1, "mi": 2, "do": 3, "fr": 4, "sa": 5, "so": 6,
+    }
+
+    for plan in plaene:
+        if not plan.score:
+            continue
+
+        # Sammle alle tatsächlichen Spiel-Daten pro Mannschaft
+        # team_games[mannschaft] = [(datum, rolle, spieltag_nr)]
+        team_games: dict[str, list[tuple[date, str]]] = {}
+        for st in plan.spieltage:
+            for spiel in st.spiele:
+                if not spiel.datum:
+                    continue
+                team_games.setdefault(spiel.heim, []).append((spiel.datum, "heim"))
+                team_games.setdefault(spiel.gast, []).append((spiel.datum, "gast"))
+
+        violations = 0
+        for mannschaft, games in team_games.items():
+            team_w = wuensche.get(mannschaft, [])
+            for w in team_w:
+                pen = 2 if w.prioritaet == WunschPrio.HART else 1
+
+                if w.kategorie == WunschKategorie.SPERRTAG and w.datum:
+                    try:
+                        sperr = date.fromisoformat(w.datum)
+                    except (ValueError, TypeError):
+                        continue
+                    for g_datum, _ in games:
+                        if g_datum == sperr:
+                            violations += pen
+                            break  # einmal pro Wunsch reicht
+
+                elif w.kategorie == WunschKategorie.WOCHENTAG and w.wochentag:
+                    gewuenscht = _WT_MAP.get(w.wochentag.strip().lower())
+                    if gewuenscht is None:
+                        continue
+                    for g_datum, _ in games:
+                        if g_datum.weekday() != gewuenscht:
+                            violations += pen
+
+                elif w.kategorie == WunschKategorie.HEIMWUNSCH and w.datum:
+                    try:
+                        wunsch_date = date.fromisoformat(w.datum)
+                    except (ValueError, TypeError):
+                        continue
+                    for g_datum, rolle in games:
+                        if g_datum == wunsch_date and rolle != "heim":
+                            violations += pen
+
+                elif w.kategorie == WunschKategorie.AUSWAERTSWUNSCH and w.datum:
+                    try:
+                        wunsch_date = date.fromisoformat(w.datum)
+                    except (ValueError, TypeError):
+                        continue
+                    for g_datum, rolle in games:
+                        if g_datum == wunsch_date and rolle != "gast":
+                            violations += pen
+
+        plan.score.wunsch_verletzungen = violations
         plan.score.berechne_total()
 
 

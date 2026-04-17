@@ -742,10 +742,16 @@
                 <div class="stat-label">Wünsche erkannt</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value" style="color: ${konflikte + wunschVerletzungen > 0 ? 'var(--danger)' : 'var(--success)'}">
-                    ${konflikte + wunschVerletzungen}
+                <div class="stat-value" style="color: ${konflikte > 0 ? 'var(--danger)' : 'var(--success)'}">
+                    ${konflikte}
                 </div>
-                <div class="stat-label">Konflikte</div>
+                <div class="stat-label">Platz-Konflikte</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" style="color: ${wunschVerletzungen > 0 ? 'var(--warning)' : 'var(--success)'}">
+                    ${wunschVerletzungen}
+                </div>
+                <div class="stat-label">Wunsch-Verletzungen</div>
             </div>
         `;
 
@@ -776,10 +782,11 @@
 
             const konflikte = plan.score ? plan.score.platz_konflikte : 0;
             const wunschV = plan.score ? plan.score.wunsch_verletzungen : 0;
-            const problemCount = konflikte + wunschV;
-            const problemBadge = problemCount > 0
-                ? `<span class="gruppe-badge badge-red">${problemCount} Konflikt${problemCount !== 1 ? 'e' : ''}</span>`
-                : `<span class="gruppe-badge badge-ok">Keine Konflikte</span>`;
+            const badges = [];
+            if (konflikte > 0) badges.push(`<span class="gruppe-badge badge-red">${konflikte} Platz-Konflikt${konflikte !== 1 ? 'e' : ''}</span>`);
+            if (wunschV > 0) badges.push(`<span class="gruppe-badge badge-orange">${wunschV} Wunsch-Verl.</span>`);
+            if (badges.length === 0) badges.push(`<span class="gruppe-badge badge-ok">Keine Konflikte</span>`);
+            const problemBadge = badges.join(' ');
 
             // Spieltage
             const spieltageHtml = plan.spieltage.map(st => {

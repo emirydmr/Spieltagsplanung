@@ -371,6 +371,10 @@ def _save_spielplan_log(result: dict, saison: str) -> Path:
         p.get("score", {}).get("platz_konflikte", 0)
         for p in result.get("spielplaene", []) if p.get("score")
     )
+    total_wunsch = sum(
+        p.get("score", {}).get("wunsch_verletzungen", 0)
+        for p in result.get("spielplaene", []) if p.get("score")
+    )
     total_spiele = sum(
         len(s["spiele"])
         for p in result.get("spielplaene", []) for s in p["spieltage"]
@@ -381,6 +385,7 @@ def _save_spielplan_log(result: dict, saison: str) -> Path:
         "total_staffeln": result.get("total_staffeln", 0),
         "total_spiele": total_spiele,
         "total_konflikte": total_konflikte,
+        "total_wunsch_verletzungen": total_wunsch,
         "wuensche_parsed": result.get("wuensche_parsed", 0),
         "spielplaene": result.get("spielplaene", []),
     }
@@ -390,7 +395,7 @@ def _save_spielplan_log(result: dict, saison: str) -> Path:
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(log_entry, f, ensure_ascii=False, indent=1)
     print(f"[LOG] Spielplan gespeichert: {filepath.name} "
-          f"({total_spiele} Spiele, {total_konflikte} Konflikte)")
+          f"({total_spiele} Spiele, {total_konflikte} Platz-Konflikte, {total_wunsch} Wunsch-Verl.)")
     return filepath
 
 

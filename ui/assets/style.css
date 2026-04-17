@@ -524,6 +524,11 @@ h1, h2, h3, h4, h5 {
     color: var(--danger);
 }
 
+.badge-orange {
+    background: rgba(230,126,34,.12);
+    color: #d68910;
+}
+
 .gruppe-meta {
     display: flex;
     align-items: center;
