@@ -23,7 +23,7 @@ from src.staffeleinteilung.algorithmus import gruppiere_mannschaften, einteilung
 from src.staffeleinteilung.scoring import ScoreGewichte
 from src.common.distanz import haversine_km
 from src.spielplanerstellung.wuensche_parser import parse_wuensche_llm
-from src.spielplanerstellung.wuensche import Wunsch
+from src.spielplanerstellung.wuensche import Wunsch, WunschKategorie, WunschPrio, VereinsWuensche
 from src.spielplanerstellung.spielplan import generiere_alle_spielplaene, spielplan_to_dict
 
 app = FastAPI(title="Spieltagsplaner", version="1.0")
@@ -338,29 +338,14 @@ async def api_spielplan(request: Request):
         raise HTTPException(400, "Keine Einteilung vorhanden")
 
     try:
-        # Wünsche aus Meldeliste-Freitext parsen (nur Teams die Wünsche haben)
-        wuensche: dict[str, list[Wunsch]] = {}
-        for gruppe in einteilung.get("gruppen", []):
-            for staffel in gruppe.get("staffeln", []):
-                for team in staffel.get("teams", []):
-                    text = team.get("wuensche_text", "").strip()
-                    if not text:
-                        continue
-                    try:
-                        result = parse_wuensche_llm(
-                            freitext=text,
-                            mannschaft=team.get("mannschaft", ""),
-                            verein=team.get("verein", ""),
-                            saison=saison,
-                        )
-                        if result.wuensche:
-                            wuensche[team["mannschaft"]] = result.wuensche
-                    except Exception:
-                        pass  # LLM-Fehler → Wunsch ignorieren
+        # Wünsche regelbasiert parsen (schnell, kein LLM)
+        wuensche = _parse_wuensche_fast(einteilung, saison)
 
         plaene = generiere_alle_spielplaene(
             einteilung, wuensche=wuensche if wuensche else None,
         )
+        # Count resolved changes (staggered times + H/A swaps)
+        resolved = sum(1 for p in plaene for st in p.spieltage for s in st.spiele if s.spielfeld)
         return JSONResponse({
             "spielplaene": [spielplan_to_dict(p) for p in plaene],
             "total_staffeln": len(plaene),
@@ -368,3 +353,157 @@ async def api_spielplan(request: Request):
         })
     except Exception as e:
         raise HTTPException(500, f"Fehler bei Spielplan-Generierung: {str(e)}")
+
+
+# ─── Schneller Wünsche-Parser (Regex, kein LLM) ───────────────
+
+import re as _re
+
+_WOCHENTAGE = {
+    "montag": "Montag", "dienstag": "Dienstag", "mittwoch": "Mittwoch",
+    "donnerstag": "Donnerstag", "freitag": "Freitag", "samstag": "Samstag",
+    "sonntag": "Sonntag",
+}
+
+_SPERR_PATTERN = _re.compile(
+    r"(?:nicht|kein|gesperrt|fällt aus|keine? (?:spiel|platz))"
+    r".*?(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?",
+    _re.IGNORECASE,
+)
+
+_DATUM_PATTERN = _re.compile(
+    r"(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?",
+)
+
+_ZEIT_PATTERN = _re.compile(
+    r"(\d{1,2})[:.:](\d{2})\s*(?:uhr)?",
+    _re.IGNORECASE,
+)
+
+_HEIM_KEYWORDS = _re.compile(
+    r"heim|heimspiel|zu\s*hause",
+    _re.IGNORECASE,
+)
+
+_AUSW_KEYWORDS = _re.compile(
+    r"auswärts|ausw[aä]rts",
+    _re.IGNORECASE,
+)
+
+_PLATZ_KEYWORDS = _re.compile(
+    r"platz.*(?:teil|shar|gemeinsam|gleichzeitig)|gleich(?:en?)\s*platz",
+    _re.IGNORECASE,
+)
+
+
+def _saison_start_year(saison: str) -> int | None:
+    """Extrahiert das Startjahr aus z.B. '2025/26' → 2025."""
+    if not saison:
+        return None
+    try:
+        return int(saison.split("/")[0])
+    except (ValueError, IndexError):
+        return None
+
+
+def _resolve_year(month: int, saison: str) -> int:
+    """Bestimmt das Jahr für einen Monat (Aug-Dez → Startjahr, Jan-Jul → Startjahr+1)."""
+    start = _saison_start_year(saison)
+    if start is None:
+        from datetime import datetime
+        now = datetime.now()
+        start = now.year if now.month >= 8 else now.year - 1
+    return start if month >= 8 else start + 1
+
+
+def _parse_wuensche_fast(
+    einteilung: dict,
+    saison: str,
+) -> dict[str, list[Wunsch]]:
+    """Parst Wünsche-Freitext regelbasiert (schnell, ohne LLM).
+
+    Erkennt: Sperrtage, Wochentag-Präferenzen, Uhrzeiten, Heim/Auswärts-Wünsche.
+    """
+    result: dict[str, list[Wunsch]] = {}
+
+    for gruppe in einteilung.get("gruppen", []):
+        for staffel in gruppe.get("staffeln", []):
+            for team in staffel.get("teams", []):
+                text = team.get("wuensche_text", "").strip()
+                if not text:
+                    continue
+
+                mannschaft = team.get("mannschaft", "")
+                wuensche: list[Wunsch] = []
+
+                # Normalisiere: _x000D_ (Excel-Zeilenumbruch) → Leerzeichen
+                text_clean = text.replace("_x000D_", " ").replace("\r", " ").replace("\n", " ")
+
+                # ── Sperrtage ──
+                for m in _SPERR_PATTERN.finditer(text_clean):
+                    day, month = int(m.group(1)), int(m.group(2))
+                    year_str = m.group(3)
+                    if year_str:
+                        year = int(year_str) if len(year_str) == 4 else 2000 + int(year_str)
+                    else:
+                        year = _resolve_year(month, saison)
+                    try:
+                        from datetime import date
+                        datum = date(year, month, day)
+                        wuensche.append(Wunsch(
+                            kategorie=WunschKategorie.SPERRTAG,
+                            prioritaet=WunschPrio.HART,
+                            beschreibung=f"Gesperrt am {datum.strftime('%d.%m.%Y')}",
+                            datum=datum.isoformat(),
+                            original_text=text,
+                        ))
+                    except ValueError:
+                        pass
+
+                # ── Wochentag-Präferenz ──
+                text_lower = text_clean.lower()
+                for wt_key, wt_name in _WOCHENTAGE.items():
+                    if wt_key in text_lower:
+                        wuensche.append(Wunsch(
+                            kategorie=WunschKategorie.WOCHENTAG,
+                            prioritaet=WunschPrio.WEICH,
+                            beschreibung=f"Bevorzugt {wt_name}",
+                            wochentag=wt_name,
+                            original_text=text,
+                        ))
+
+                # ── Uhrzeit ──
+                zeit_match = _ZEIT_PATTERN.search(text_clean)
+                if zeit_match:
+                    h, m = int(zeit_match.group(1)), int(zeit_match.group(2))
+                    if 8 <= h <= 21:
+                        wuensche.append(Wunsch(
+                            kategorie=WunschKategorie.ANSTOSSZEIT,
+                            prioritaet=WunschPrio.WEICH,
+                            beschreibung=f"Anstoß {h:02d}:{m:02d}",
+                            uhrzeit=f"{h:02d}:{m:02d}",
+                            original_text=text,
+                        ))
+
+                # ── Heim/Auswärts-Beziehung ──
+                if _HEIM_KEYWORDS.search(text_clean) and _AUSW_KEYWORDS.search(text_clean):
+                    # "Wenn Heim, dann andere Auswärts" → Platzsharing-Hinweis
+                    wuensche.append(Wunsch(
+                        kategorie=WunschKategorie.PLATZSHARING,
+                        prioritaet=WunschPrio.WEICH,
+                        beschreibung="Heim/Auswärts-Abstimmung gewünscht",
+                        original_text=text,
+                    ))
+
+                # ── Fallback: wenn nichts erkannt, als Sonstiges speichern ──
+                if not wuensche:
+                    wuensche.append(Wunsch(
+                        kategorie=WunschKategorie.SONSTIGES,
+                        prioritaet=WunschPrio.WEICH,
+                        beschreibung=text_clean[:200],
+                        original_text=text,
+                    ))
+
+                result[mannschaft] = wuensche
+
+    return result

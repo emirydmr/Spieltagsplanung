@@ -4,13 +4,18 @@ Jedes Team in einer Staffel bekommt eine Schlüsselzahl (SZ).
 Die SZ bestimmt über den Schlüsselplan das gesamte Heim/Auswärts-Muster.
 
 Die Zuordnung wird optimiert nach:
-  1. Heim/Auswärts-Gleichverteilung
+  1. Heim/Auswärts-Gleichverteilung + keine langen Heim-/Auswärts-Serien
   2. Faire Auswärtskilometer-Verteilung
   3. Vereinswünsche (Sperrtage, Heimwünsche, Platzsharing)
-  4. Jüngere AK spielen früher als ältere am gleichen Tag (weich)
+  4. Miniminierung von Spielfeld-Doppelbelegungen
+
+Algorithmus:
+  - Kleine Staffeln (≤7 Teams): Exakte Lösung (alle Permutationen)
+  - Größere: Simulated Annealing mit Multi-Start
 """
 
 import itertools
+import math
 import random
 from dataclasses import dataclass, field
 from datetime import date
@@ -47,6 +52,7 @@ class SpielplanScore:
     """Score für eine Schlüsselzahlen-Zuordnung."""
     total: float = 0.0
     heim_balance: float = 0.0       # Wie gleichmäßig Heim verteilt ist
+    consecutive_penalty: float = 0.0 # Aufeinanderfolgende Heim-/Auswärtsspiele
     distanz_fairness: float = 0.0   # Wie fair Auswärtskm verteilt sind
     wunsch_verletzungen: int = 0    # Anzahl verletzter Wünsche
     platz_konflikte: int = 0        # Doppelbelegungen am gleichen Tag
@@ -54,9 +60,10 @@ class SpielplanScore:
     def berechne_total(self) -> float:
         self.total = (
             self.heim_balance * 10.0
+            + self.consecutive_penalty * 25.0
             + self.distanz_fairness * 1.0
             + self.wunsch_verletzungen * 100.0
-            + self.platz_konflikte * 500.0
+            + self.platz_konflikte * 50.0
         )
         return self.total
 
@@ -79,6 +86,7 @@ def _score_zuordnung(
     """
     score = SpielplanScore()
     paarungen = get_paarungen_pro_spieltag(staffelgroesse)
+    sorted_spieltage = sorted(paarungen.keys())
 
     # ── Pre-compute: Team-Rolle pro Spieltag ──
     # {spieltag_nr: {sz: "heim"|"gast"|"frei"}}
@@ -106,6 +114,26 @@ def _score_zuordnung(
         vals = list(heim_counts.values())
         avg = sum(vals) / len(vals) if vals else 0
         score.heim_balance = sum((v - avg) ** 2 for v in vals)
+
+    # ── 1b. Consecutive Home/Away penalty ──
+    # 3+ Heim- oder Auswärtsspiele hintereinander sind unerwünscht
+    for sz, team in sz_mapping.items():
+        consecutive = 0
+        last_role = None
+        for st_nr in sorted_spieltage:
+            rolle = team_rolle.get(st_nr, {}).get(sz)
+            if rolle is None:
+                # spielfrei unterbricht Serien
+                last_role = None
+                consecutive = 0
+                continue
+            if rolle == last_role:
+                consecutive += 1
+                if consecutive >= 2:  # 3+ gleiche Rolle
+                    score.consecutive_penalty += (consecutive - 1)
+            else:
+                consecutive = 0
+            last_role = rolle
 
     # ── 2. Auswärtskilometer-Fairness ──
     ausw_km: dict[str, float] = {t["mannschaft"]: 0.0 for t in teams}
@@ -151,6 +179,8 @@ def _score_zuordnung(
                         w, sz, paarungen, team_rolle, spieltag_dates, penalty)
 
     # ── 4. Platz-Konflikte (gleichzeitig Heim am selben Ort) ──
+    # 2 am gleichen Ort → leicht lösbar (gestaffelte Zeiten)
+    # 3+ → immer schwieriger, daher exponentiell
     for spieltag, matches in paarungen.items():
         heim_at_platz: dict[str, list[str]] = {}
         for h_sz, g_sz in matches:
@@ -160,8 +190,10 @@ def _score_zuordnung(
                 if addr:
                     heim_at_platz.setdefault(addr, []).append(h_team["mannschaft"])
         for addr, teams_at in heim_at_platz.items():
-            if len(teams_at) > 1:
-                score.platz_konflikte += len(teams_at) - 1
+            extra = len(teams_at) - 1
+            if extra >= 1:
+                # 2 = 1 conflict, 3 = 3 conflicts, 4 = 6 etc. (triangular)
+                score.platz_konflikte += extra * (extra + 1) // 2
 
     score.berechne_total()
     return score
@@ -246,8 +278,11 @@ def vergebe_schluesselzahlen(
 ) -> tuple[list[SZZuordnung], SpielplanScore]:
     """Findet die optimale SZ-Zuordnung für eine Staffel.
 
-    Für kleine Staffeln (≤8): probiert alle Permutationen.
-    Für größere: verwendet Zufallsoptimierung.
+    Algorithmus:
+      - Kleine Staffeln (≤7 Teams): Exakte Lösung (alle Permutationen)
+      - Größere: Simulated Annealing mit Multi-Start
+        - Temperatur sinkt exponentiell, erlaubt anfangs schlechtere Lösungen
+        - Mehrere unabhängige Starts → beste Lösung gewinnt
 
     Args:
         teams: Liste von Team-Dicts (mannschaft, verein, region, lat, lon, adresse)
@@ -283,40 +318,48 @@ def vergebe_schluesselzahlen(
                 best_score = score
                 best_mapping = mapping.copy()
     else:
-        # Zufallsoptimierung mit Swap-Hill-Climbing
-        max_iters = min(5_000, n * 500)  # Skaliert mit Staffelgröße
-        current_perm = list(available_sz)
-        random.shuffle(current_perm)
-        current_mapping = {current_perm[i]: teams[i] for i in range(n)}
-        current_score = _score_zuordnung(teams, current_mapping, staffelgroesse, wuensche, spieltag_dates)
-        best_score = current_score
-        best_mapping = current_mapping.copy()
+        # Simulated Annealing with Multi-Start
+        n_restarts = max(3, min(8, 40_000 // (n * 500)))
+        iters_per_run = min(8_000, n * 800)
+        t_start = 500.0
+        t_end = 0.1
 
-        no_improve = 0
-        for _ in range(max_iters):
-            # Random swap
-            i, j = random.sample(range(n), 2)
-            new_perm = list(current_perm)
-            new_perm[i], new_perm[j] = new_perm[j], new_perm[i]
-            new_mapping = {new_perm[k]: teams[k] for k in range(n)}
-            new_score = _score_zuordnung(teams, new_mapping, staffelgroesse, wuensche, spieltag_dates)
+        for _run in range(n_restarts):
+            current_perm = list(available_sz)
+            random.shuffle(current_perm)
+            current_mapping = {current_perm[i]: teams[i] for i in range(n)}
+            current_score = _score_zuordnung(teams, current_mapping, staffelgroesse, wuensche, spieltag_dates)
 
-            if new_score.total < current_score.total:
-                current_perm = new_perm
-                current_mapping = new_mapping
-                current_score = new_score
-                no_improve = 0
-                if new_score.total < best_score.total:
-                    best_score = new_score
-                    best_mapping = new_mapping.copy()
-            else:
-                no_improve += 1
-                if no_improve > n * 100:
-                    # Restart
-                    random.shuffle(current_perm)
-                    current_mapping = {current_perm[k]: teams[k] for k in range(n)}
-                    current_score = _score_zuordnung(teams, current_mapping, staffelgroesse, wuensche, spieltag_dates)
-                    no_improve = 0
+            run_best_score = current_score
+            run_best_mapping = current_mapping.copy()
+
+            for step in range(iters_per_run):
+                # Temperature: exponential cooling
+                t = t_start * ((t_end / t_start) ** (step / max(1, iters_per_run - 1)))
+
+                # Neighborhood: swap two random SZ assignments
+                i, j = random.sample(range(n), 2)
+                new_perm = list(current_perm)
+                new_perm[i], new_perm[j] = new_perm[j], new_perm[i]
+                new_mapping = {new_perm[k]: teams[k] for k in range(n)}
+                new_score = _score_zuordnung(teams, new_mapping, staffelgroesse, wuensche, spieltag_dates)
+
+                delta = new_score.total - current_score.total
+
+                # Accept better solutions always; worse with probability e^(-delta/T)
+                if delta < 0 or random.random() < math.exp(-delta / max(t, 1e-10)):
+                    current_perm = new_perm
+                    current_mapping = new_mapping
+                    current_score = new_score
+
+                    if current_score.total < run_best_score.total:
+                        run_best_score = current_score
+                        run_best_mapping = current_mapping.copy()
+
+            # Keep global best across all restarts
+            if best_score is None or run_best_score.total < best_score.total:
+                best_score = run_best_score
+                best_mapping = run_best_mapping.copy()
 
     # Convert best mapping to SZZuordnung list
     zuordnungen = []

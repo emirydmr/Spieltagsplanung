@@ -761,53 +761,62 @@
         spielplanContainer.innerHTML = filtered.map((plan, idx) => {
             const drBadge = plan.doppelrunde
                 ? '<span class="gruppe-badge badge-gold">Doppelrunde</span>' : '';
-            const scoreBadge = plan.score
-                ? `<span style="color: var(--text-muted); font-weight: 400; font-size: 0.85rem;">Score: ${plan.score.total}</span>` : '';
 
-            // SZ table
-            const szRows = plan.sz_zuordnungen.map(z =>
-                `<tr><td>${z.mannschaft}</td><td style="text-align:center; font-weight:600;">${z.sz}</td></tr>`
-            ).join('');
+            const konflikte = plan.score ? plan.score.platz_konflikte : 0;
+            const wunschV = plan.score ? plan.score.wunsch_verletzungen : 0;
+            const problemCount = konflikte + wunschV;
+            const problemBadge = problemCount > 0
+                ? `<span class="gruppe-badge badge-red">${problemCount} Konflikt${problemCount !== 1 ? 'e' : ''}</span>`
+                : `<span class="gruppe-badge badge-ok">Keine Konflikte</span>`;
 
             // Spieltage
             const spieltageHtml = plan.spieltage.map(st => {
                 const datumStr = st.datum
-                    ? new Date(st.datum).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })
-                    : '–';
-                const zeitStr = st.anstosszeit || '';
+                    ? new Date(st.datum).toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })
+                    : 'Termin offen';
 
                 const spieleRows = st.spiele.map(s => {
-                    // Per-Spiel Datum/Zeit (falls abweichend vom Spieltag)
-                    const sDatum = s.datum
-                        ? new Date(s.datum).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' })
-                        : '';
-                    const sZeit = s.anstosszeit || '';
-                    const zeitInfo = sZeit ? `<span class="spiel-zeit">${sDatum ? sDatum + ' ' : ''}${sZeit}</span>` : '';
-                    const feldInfo = s.spielfeld ? `<span class="spiel-feld" title="${s.spielfeld}">${s.spielfeld.split(', ').pop()}</span>` : '';
-                    return `<tr>
-                        <td style="text-align:right; padding-right:0.5rem;">${s.heim}</td>
-                        <td style="text-align:center; font-weight:600; color:var(--text-muted);">vs</td>
-                        <td style="padding-left:0.5rem;">${s.gast}</td>
-                        <td class="spiel-meta">${zeitInfo}${feldInfo}</td>
-                    </tr>`;
+                    const sZeit = s.anstosszeit || '–';
+                    const ort = s.spielfeld ? s.spielfeld.split(', ').pop() : '–';
+                    return `
+                        <div class="spiel-row">
+                            <div class="spiel-zeit-col">${sZeit}</div>
+                            <div class="spiel-paarung">
+                                <span class="spiel-heim">${s.heim}</span>
+                                <span class="spiel-vs">–</span>
+                                <span class="spiel-gast">${s.gast}</span>
+                            </div>
+                            <div class="spiel-ort-col" title="${s.spielfeld || ''}">${ort}</div>
+                        </div>
+                    `;
                 }).join('');
 
                 const spielfreiHtml = st.spielfrei
                     ? `<div class="spielfrei-hint">Spielfrei: ${st.spielfrei}</div>` : '';
 
                 return `
-                    <div class="spieltag-block">
-                        <div class="spieltag-header">
+                    <div class="spieltag-card">
+                        <div class="spieltag-card-header">
                             <span class="spieltag-nr">Spieltag ${st.nummer}</span>
-                            <span class="spieltag-datum">${datumStr}${zeitStr ? ' · ' + zeitStr : ''}</span>
+                            <span class="spieltag-datum">${datumStr}</span>
                         </div>
-                        <table class="spiele-table">
-                            <tbody>${spieleRows}</tbody>
-                        </table>
+                        <div class="spiel-list-header">
+                            <div class="spiel-zeit-col">Zeit</div>
+                            <div class="spiel-paarung">Paarung</div>
+                            <div class="spiel-ort-col">Spielort</div>
+                        </div>
+                        <div class="spiel-list">
+                            ${spieleRows}
+                        </div>
                         ${spielfreiHtml}
                     </div>
                 `;
             }).join('');
+
+            // SZ toggle section
+            const szRows = plan.sz_zuordnungen.map(z =>
+                `<tr><td>${z.mannschaft}</td><td style="text-align:center; font-weight:700;">${z.sz}</td></tr>`
+            ).join('');
 
             return `
                 <div class="gruppe spielplan-gruppe">
@@ -815,27 +824,25 @@
                         <div class="gruppe-title">
                             <span>${plan.altersklasse} ${plan.topf} – ${plan.staffel_name}</span>
                             ${drBadge}
+                            ${problemBadge}
                             <span style="color: var(--text-muted); font-weight: 400; font-size: 0.85rem;">
                                 ${plan.n_teams} Teams · ${plan.spieltage.length} Spieltage
                             </span>
                         </div>
                         <div class="gruppe-meta">
-                            ${scoreBadge}
                             <span class="gruppe-chevron">▼</span>
                         </div>
                     </div>
-                    <div class="gruppe-body">
-                        <div class="spielplan-content">
-                            <div class="sz-section">
-                                <h4>Schlüsselzahlen</h4>
-                                <table class="teams-table sz-table">
-                                    <thead><tr><th>Mannschaft</th><th style="text-align:center;">SZ</th></tr></thead>
-                                    <tbody>${szRows}</tbody>
-                                </table>
-                            </div>
-                            <div class="spieltage-section">
-                                ${spieltageHtml}
-                            </div>
+                    <div class="gruppe-body spielplan-body">
+                        <details class="sz-details">
+                            <summary>Schlüsselzahlen anzeigen</summary>
+                            <table class="teams-table sz-table">
+                                <thead><tr><th>Mannschaft</th><th style="text-align:center;">SZ</th></tr></thead>
+                                <tbody>${szRows}</tbody>
+                            </table>
+                        </details>
+                        <div class="spieltage-list">
+                            ${spieltageHtml}
                         </div>
                     </div>
                 </div>

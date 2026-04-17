@@ -678,81 +678,165 @@ table.teams-table {
 
 /* ─── Spieltagsplanung ─────────────────────────────────────── */
 
-.spielplan-content {
-    display: grid;
-    grid-template-columns: 220px 1fr;
-    gap: 1.5rem;
-    padding: 0.5rem 0;
+.spielplan-body {
+    padding: 1rem 1.25rem;
 }
 
-.sz-section h4 {
-    font-size: 0.85rem;
+.sz-details {
+    margin-bottom: 1rem;
+}
+
+.sz-details summary {
+    cursor: pointer;
+    font-size: 0.82rem;
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    padding: 0.5rem 0;
+    user-select: none;
+}
+
+.sz-details summary:hover {
+    color: var(--accent);
+}
+
+.sz-details[open] summary {
     margin-bottom: 0.5rem;
 }
 
 .sz-table {
     font-size: 0.85rem;
+    max-width: 360px;
 }
 
 .sz-table th, .sz-table td {
     padding: 0.35rem 0.5rem;
 }
 
-.spieltage-section {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 0.75rem;
-    align-content: start;
+.spieltage-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
 }
 
-.spieltag-block {
+.spieltag-card {
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius);
     overflow: hidden;
 }
 
-.spieltag-header {
+.spieltag-card-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.5rem 0.75rem;
-    background: var(--bg-card);
-    border-bottom: 1px solid var(--border);
+    padding: 0.65rem 1rem;
+    background: var(--bg-dark);
+    color: #fff;
 }
 
 .spieltag-nr {
-    font-weight: 600;
-    font-size: 0.85rem;
-    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.88rem;
 }
 
 .spieltag-datum {
-    font-size: 0.8rem;
-    color: var(--text-muted);
+    font-size: 0.82rem;
+    opacity: 0.75;
 }
 
-.spiele-table {
-    width: 100%;
-    font-size: 0.85rem;
-    border-collapse: collapse;
-}
-
-.spiele-table td {
-    padding: 0.3rem 0.5rem;
+.spiel-list-header {
+    display: grid;
+    grid-template-columns: 70px 1fr 160px;
+    gap: 0.5rem;
+    padding: 0.4rem 1rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-light);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     border-bottom: 1px solid var(--border);
+    background: var(--bg-card);
 }
 
-.spiele-table tr:last-child td {
+.spiel-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.spiel-row {
+    display: grid;
+    grid-template-columns: 70px 1fr 160px;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-card);
+    font-size: 0.88rem;
+    transition: background var(--transition);
+}
+
+.spiel-row:last-child {
     border-bottom: none;
 }
 
+.spiel-row:hover {
+    background: var(--bg);
+}
+
+.spiel-zeit-col {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.spiel-paarung {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.spiel-heim {
+    font-weight: 600;
+    text-align: right;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.spiel-vs {
+    color: var(--text-light);
+    font-weight: 400;
+    flex-shrink: 0;
+}
+
+.spiel-gast {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.spiel-ort-col {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.badge-ok {
+    background: rgba(5, 150, 105, 0.1);
+    color: var(--success);
+}
+
 .spielfrei-hint {
-    padding: 0.35rem 0.75rem;
+    padding: 0.4rem 1rem;
     font-size: 0.8rem;
     color: var(--text-muted);
     font-style: italic;
@@ -760,35 +844,13 @@ table.teams-table {
     background: var(--bg-card);
 }
 
-.spiel-meta {
-    text-align: right;
-    white-space: nowrap;
-    padding-left: 0.5rem;
-}
-
-.spiel-zeit {
-    font-size: 0.75rem;
-    color: var(--accent);
-    font-weight: 600;
-    margin-right: 0.4rem;
-}
-
-.spiel-feld {
-    font-size: 0.7rem;
-    color: var(--text-light);
-    max-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: inline-block;
-    vertical-align: middle;
-}
-
 @media (max-width: 768px) {
-    .spielplan-content {
-        grid-template-columns: 1fr;
+    .spiel-list-header,
+    .spiel-row {
+        grid-template-columns: 55px 1fr 100px;
     }
-    .spieltage-section {
-        grid-template-columns: 1fr;
+    .spieltage-list {
+        gap: 0.75rem;
     }
 }
 

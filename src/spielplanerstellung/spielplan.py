@@ -211,6 +211,13 @@ def generiere_alle_spielplaene(
 ) -> list[StaffelSpielplan]:
     """Generiert Spielpläne für alle Staffeln aus der Einteilung.
 
+    Ansatz: Inkrementelle Slot-Vergabe, jüngste AK zuerst.
+      1. Alle Spielpläne generieren (SZ-Vergabe, Paarungen, Daten)
+      2. Alle Anstoßzeiten löschen
+      3. AK für AK (jüngste zuerst) jedem Spiel einen freien Slot zuweisen
+      4. Bei Konflikt: nächsten freien Slot oder H/A-Tausch
+      5. Garantie: Jedes Spiel bekommt eine Uhrzeit, keine Überlappungen
+
     Args:
         einteilung_data: Das JSON-Result von /api/einteilung
         wuensche: Wünsche pro Mannschaftsname
@@ -243,13 +250,250 @@ def generiere_alle_spielplaene(
             )
             alle_plaene.append(plan)
 
-    # Spielfeld-Kollisionen über alle Staffeln hinweg auflösen
-    resolve_spielfeld_konflikte(alle_plaene)
+    # CP-SAT Slot-Vergabe: globale Optimierung, konfliktfrei
+    from src.spielplanerstellung.slot_solver import solve_game_slots
+    solve_game_slots(alle_plaene, time_limit_seconds=120)
+
+    # Zähle verbleibende Konflikte (sollte 0 oder nahe 0 sein)
+    _update_platz_konflikte(alle_plaene)
 
     return alle_plaene
 
 
-# ─── Spielfeld-Konflikt-Erkennung und -Auflösung ──────────────
+def _update_platz_konflikte(plaene: list[StaffelSpielplan]) -> None:
+    """Zählt verbleibende Spielfeld-Konflikte nach der Auflösung und aktualisiert Scores."""
+    # Sammle alle Spiele → (feld, datum) → [(zeit_start, zeit_end, halbfeld)]
+    from collections import defaultdict
+    belegung: dict[tuple[str, str], list[tuple[int, int, bool]]] = defaultdict(list)
+
+    for plan in plaene:
+        halbfeld = _ist_halbfeld(plan.altersklasse)
+        dauer = _get_spieldauer_min(plan.altersklasse)
+        for st in plan.spieltage:
+            for spiel in st.spiele:
+                if not spiel.spielfeld or not spiel.datum:
+                    continue
+                key = (spiel.spielfeld.strip().lower(), spiel.datum.isoformat())
+                zeit = _parse_time(spiel.anstosszeit)
+                start = zeit[0] * 60 + zeit[1] if zeit else 720
+                belegung[key].append((start, start + dauer, halbfeld))
+
+    # Zähle Konflikte pro Feld/Datum
+    remaining: dict[tuple[str, str], int] = {}
+    for key, entries in belegung.items():
+        entries.sort()
+        konflikte = 0
+        for i in range(len(entries)):
+            for j in range(i + 1, len(entries)):
+                s_i, e_i, hf_i = entries[i]
+                s_j, e_j, hf_j = entries[j]
+                # Überlappung?
+                if s_j < e_i:
+                    # Halbfeld: 2 gleichzeitig OK
+                    if hf_i and hf_j and s_i == s_j:
+                        continue
+                    konflikte += 1
+        remaining[key] = konflikte
+
+    # Verteile auf Staffeln: Jede Staffel bekommt die Konflikte ihrer Heimspiele
+    for plan in plaene:
+        if not plan.score:
+            continue
+        plan.score.platz_konflikte = 0
+        for st in plan.spieltage:
+            for spiel in st.spiele:
+                if not spiel.spielfeld or not spiel.datum:
+                    continue
+                key = (spiel.spielfeld.strip().lower(), spiel.datum.isoformat())
+                if remaining.get(key, 0) > 0:
+                    plan.score.platz_konflikte += 1
+                    remaining[key] -= 1
+        plan.score.berechne_total()
+
+
+# ─── Inkrementelle Slot-Vergabe ────────────────────────────────
+
+# AK-Reihenfolge: jüngste zuerst (bekommen die Wunschzeiten)
+_AK_ORDER: dict[str, int] = {
+    "F-Junioren": 0, "F-Juniorinnen": 1,
+    "E-Junioren": 2, "E-Juniorinnen": 3,
+    "D-Junioren": 4, "D-Juniorinnen": 5,
+    "C-Junioren": 6, "C-Juniorinnen": 7,
+    "B-Junioren": 8, "B-Juniorinnen": 9,
+    "A-Junioren": 10, "A-Juniorinnen": 11,
+}
+
+# Frühester / spätester Anstoß (Sommer vs. Winter)
+_EARLIEST_SUMMER = 9 * 60           # 09:00
+_LATEST_SUMMER = 19 * 60 + 30       # 19:30
+_EARLIEST_WINTER = 9 * 60           # 09:00
+_LATEST_WINTER = 17 * 60            # 17:00
+
+
+def _assign_slots_incremental(plaene: list[StaffelSpielplan]) -> None:
+    """Weist allen Spielen konfliktfrei Anstoßzeiten zu.
+
+    Vorgehen:
+      1. Sammle alle Spiele aller Staffeln
+      2. Sortiere: jüngste AK zuerst → bekommen ihre Wunschzeit
+      3. Für jedes Spiel: finde an (spielfeld, datum) den ersten freien Slot
+      4. Falls kein Slot frei: tausche Heim/Auswärts und probiere Gast-Venue
+      5. Fallback: nächster freier Slot (auch nach Standardzeiten)
+    """
+    # Globale Belegung: (venue_lower, datum_iso) → [(start_min, end_min, halbfeld)]
+    venue_slots: dict[tuple[str, str], list[tuple[int, int, bool]]] = {}
+
+    # Sammle alle Spiele mit Metadaten
+    all_games: list[tuple[int, StaffelSpielplan, Spieltag, Spiel]] = []
+    for plan in plaene:
+        ak_order = _AK_ORDER.get(plan.altersklasse, 99)
+        for st in plan.spieltage:
+            for spiel in st.spiele:
+                all_games.append((ak_order, plan, st, spiel))
+
+    # Sortiere: jüngste AK zuerst
+    all_games.sort(key=lambda x: x[0])
+
+    for _, plan, st, spiel in all_games:
+        if not spiel.datum:
+            # Kein Datum (z.B. Rückrunde) → Standardzeit behalten
+            continue
+
+        ak = plan.altersklasse
+        dauer = _get_spieldauer_min(ak)
+        halbfeld = _ist_halbfeld(ak)
+
+        # Winter oder Sommer?
+        is_winter = spiel.datum.month in (11, 12, 1, 2)
+        earliest = _EARLIEST_WINTER if is_winter else _EARLIEST_SUMMER
+        latest = _LATEST_WINTER if is_winter else _LATEST_SUMMER
+
+        # Gewünschte Startzeit (aus Terminplan)
+        preferred = _parse_time(spiel.anstosszeit)
+        preferred_min = preferred[0] * 60 + preferred[1] if preferred else (earliest + 60)
+
+        # Versuche zuerst am Heim-Venue
+        venue = spiel.spielfeld.strip().lower() if spiel.spielfeld else ""
+        datum_iso = spiel.datum.isoformat()
+
+        if venue:
+            slot = _find_free_slot(
+                venue_slots, venue, datum_iso, preferred_min, dauer, halbfeld, earliest, latest
+            )
+            if slot is not None:
+                _book_slot(venue_slots, venue, datum_iso, slot, dauer, halbfeld)
+                spiel.anstosszeit = _format_time(slot // 60, slot % 60)
+                continue
+
+        # Heim-Venue voll → versuche H/A-Tausch
+        gast_addr = _find_adresse(plan.sz_zuordnungen, spiel.gast)
+        gast_venue = gast_addr.strip().lower() if gast_addr else ""
+
+        if gast_venue and gast_venue != venue:
+            slot = _find_free_slot(
+                venue_slots, gast_venue, datum_iso, preferred_min, dauer, halbfeld, earliest, latest
+            )
+            if slot is not None:
+                # Tausche Heim/Auswärts
+                spiel.heim, spiel.gast = spiel.gast, spiel.heim
+                spiel.heim_verein, spiel.gast_verein = spiel.gast_verein, spiel.heim_verein
+                spiel.spielfeld = gast_addr
+                _book_slot(venue_slots, gast_venue, datum_iso, slot, dauer, halbfeld)
+                spiel.anstosszeit = _format_time(slot // 60, slot % 60)
+                continue
+
+        # Fallback: forciere am Heim-Venue (auch spätere Zeiten)
+        if venue:
+            slot = _find_free_slot(
+                venue_slots, venue, datum_iso, earliest, dauer, halbfeld, earliest, 23 * 60
+            )
+            if slot is not None:
+                _book_slot(venue_slots, venue, datum_iso, slot, dauer, halbfeld)
+                spiel.anstosszeit = _format_time(slot // 60, slot % 60)
+                continue
+
+        # Absoluter Fallback: behalte Standardzeit (kann Konflikt geben)
+        if preferred:
+            _book_slot(venue_slots, venue or "__unknown__", datum_iso, preferred_min, dauer, halbfeld)
+
+
+def _find_free_slot(
+    venue_slots: dict[tuple[str, str], list[tuple[int, int, bool]]],
+    venue: str,
+    datum_iso: str,
+    preferred_start: int,
+    dauer: int,
+    halbfeld: bool,
+    earliest: int,
+    latest: int,
+) -> int | None:
+    """Findet den nächsten freien Slot ab preferred_start.
+
+    Gibt die Startzeit in Minuten zurück, oder None wenn nichts passt.
+    """
+    key = (venue, datum_iso)
+    existing = venue_slots.get(key, [])
+
+    # Versuche preferred_start zuerst, dann in 15-Min-Schritten aufwärts
+    for offset in range(0, latest - earliest + dauer, 15):
+        candidate = preferred_start + offset
+        if candidate < earliest:
+            continue
+        if candidate + dauer > latest + dauer:  # Spiel darf bis latest + dauer_min laufen
+            break
+
+        end = candidate + dauer
+
+        conflict = False
+        for s_start, s_end, s_hf in existing:
+            # Überlappung?
+            if candidate < s_end and end > s_start:
+                # Halbfeld: 2 gleichzeitig OK wenn gleiche Startzeit
+                if halbfeld and s_hf and candidate == s_start:
+                    # Zähle wie viele schon zu dieser Zeit laufen
+                    same_time = sum(1 for ss, se, shf in existing if shf and ss == candidate)
+                    if same_time < 2:
+                        continue
+                conflict = True
+                break
+
+        if not conflict:
+            return candidate
+
+    # Auch vor preferred_start probieren
+    for offset in range(15, preferred_start - earliest + 15, 15):
+        candidate = preferred_start - offset
+        if candidate < earliest:
+            break
+
+        end = candidate + dauer
+        conflict = False
+        for s_start, s_end, s_hf in existing:
+            if candidate < s_end and end > s_start:
+                if halbfeld and s_hf and candidate == s_start:
+                    same_time = sum(1 for ss, se, shf in existing if shf and ss == candidate)
+                    if same_time < 2:
+                        continue
+                conflict = True
+                break
+
+        if not conflict:
+            return candidate
+
+    return None
+
+
+def _book_slot(
+    venue_slots: dict[tuple[str, str], list[tuple[int, int, bool]]],
+    venue: str,
+    datum_iso: str,
+    start: int,
+    dauer: int,
+    halbfeld: bool,
+) -> None:
+    """Bucht einen Slot in der Venue-Belegung."""
+    key = (venue, datum_iso)
+    venue_slots.setdefault(key, []).append((start, start + dauer, halbfeld))
 
 # Offizielle Spielzeiten WFV Jugendfußball + Puffer
 # Spielzeit = 2 × Halbzeit + Halbzeitpause + Nachspielzeit + Wechselpuffer
@@ -300,113 +544,6 @@ def _format_time(h: int, m: int) -> str:
     return f"{h:02d}:{m:02d}"
 
 
-def _add_minutes(h: int, m: int, minutes: int) -> tuple[int, int]:
-    """Addiert Minuten zu einer Uhrzeit."""
-    total = h * 60 + m + minutes
-    return (total // 60) % 24, total % 60
-
-
-@dataclass
-class _SpielRef:
-    """Referenz auf ein Spiel mit Metadaten für die Kollisionsprüfung."""
-    spiel: Spiel
-    altersklasse: str
-    dauer_min: int
-    halbfeld: bool
-
-
-def resolve_spielfeld_konflikte(plaene: list[StaffelSpielplan]) -> int:
-    """Erkennt und löst Spielfeld-Kollisionen über alle Staffeln.
-
-    Berücksichtigt:
-      - AK-spezifische Spieldauer (A=125min, B=110, C=100, D=75, E=60, F=45)
-      - Halbfeld-AK (D und jünger): 2 Spiele gleichzeitig auf 1 Großfeld erlaubt
-      - Staffelt Anstoßzeiten wenn das Spielfeld nicht reicht
-
-    Returns:
-        Anzahl verschobener Spiele
-    """
-    # Sammle alle Spiele: Key = (spielfeld_lower, datum_iso)
-    belegung: dict[tuple[str, str], list[_SpielRef]] = {}
-
-    for plan in plaene:
-        ak = plan.altersklasse
-        dauer = _get_spieldauer_min(ak)
-        halbfeld = _ist_halbfeld(ak)
-
-        for st in plan.spieltage:
-            for spiel in st.spiele:
-                if not spiel.spielfeld or not spiel.datum:
-                    continue
-                key = (spiel.spielfeld.strip().lower(), spiel.datum.isoformat())
-                belegung.setdefault(key, []).append(
-                    _SpielRef(spiel=spiel, altersklasse=ak, dauer_min=dauer, halbfeld=halbfeld)
-                )
-
-    konflikte_behoben = 0
-
-    for (feld, datum_str), refs in belegung.items():
-        if len(refs) < 2:
-            continue
-
-        # Sortiere nach Anstoßzeit
-        refs.sort(key=lambda r: _parse_time(r.spiel.anstosszeit) or (12, 0))
-
-        # Prüfe Belegungsslots: Großfeld = 1 Großfeldspiel ODER 2 Halbfeldspiele gleichzeitig
-        # Wir tracken belegte Zeitfenster als Liste von (start_min, end_min, halbfeld_count)
-        slots: list[dict] = []
-        # slot = {"start": int, "end": int, "halbfeld_count": int, "grossfeld": bool}
-
-        for ref in refs:
-            zeit = _parse_time(ref.spiel.anstosszeit)
-            if zeit is None:
-                continue
-
-            start_total = zeit[0] * 60 + zeit[1]
-            end_total = start_total + ref.dauer_min
-
-            placed = False
-
-            if ref.halbfeld:
-                # Halbfeld-Spiel: kann parallel mit 1 anderem Halbfeld-Spiel
-                for slot in slots:
-                    # Passt zeitlich in diesen Slot UND Slot ist Halbfeld mit <2 Spielen?
-                    if (slot["halbfeld_count"] < 2
-                            and not slot["grossfeld"]
-                            and slot["start"] == start_total):
-                        slot["halbfeld_count"] += 1
-                        slot["end"] = max(slot["end"], end_total)
-                        placed = True
-                        break
-
-            if not placed:
-                # Prüfe ob dieser Zeitslot mit bestehenden Slots kollidiert
-                conflict = True
-                while conflict:
-                    conflict = False
-                    for slot in slots:
-                        # Überlappung?
-                        if start_total < slot["end"] and end_total > slot["start"]:
-                            # Konflikt → verschiebe nach Ende dieses Slots
-                            new_start = slot["end"]
-                            new_h, new_m = new_start // 60, new_start % 60
-                            ref.spiel.anstosszeit = _format_time(new_h % 24, new_m)
-                            start_total = new_start
-                            end_total = start_total + ref.dauer_min
-                            conflict = True
-                            konflikte_behoben += 1
-                            break
-
-                slots.append({
-                    "start": start_total,
-                    "end": end_total,
-                    "halbfeld_count": 1 if ref.halbfeld else 0,
-                    "grossfeld": not ref.halbfeld,
-                })
-
-    return konflikte_behoben
-
-
 def spielplan_to_dict(plan: StaffelSpielplan) -> dict:
     """Konvertiert einen Spielplan in ein JSON-fähiges Dict."""
     return {
@@ -423,6 +560,7 @@ def spielplan_to_dict(plan: StaffelSpielplan) -> dict:
         "score": {
             "total": round(plan.score.total, 1),
             "heim_balance": round(plan.score.heim_balance, 2),
+            "consecutive_penalty": round(plan.score.consecutive_penalty, 1),
             "distanz_fairness": round(plan.score.distanz_fairness, 1),
             "wunsch_verletzungen": plan.score.wunsch_verletzungen,
             "platz_konflikte": plan.score.platz_konflikte,
