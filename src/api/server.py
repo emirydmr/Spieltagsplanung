@@ -427,6 +427,271 @@ async def api_spielplan_load(filename: str):
     return JSONResponse(data)
 
 
+# ─── Manuelle Spielplan-Bearbeitung ────────────────────────────
+
+@app.post("/api/spielplan/edit")
+async def api_spielplan_edit(request: Request):
+    """Wendet manuelle Änderungen auf Spielpläne an und berechnet Konflikte neu.
+
+    Erwartet JSON mit:
+      - spielplaene: aktueller Stand aller Spielpläne
+      - edits: Liste von Änderungen [{staffel_idx, spieltag_nr, spiel_idx, field, value}]
+
+    field kann sein: 'datum', 'anstosszeit', 'swap_teams'
+    """
+    data = await request.json()
+    spielplaene = data.get("spielplaene", [])
+    edits = data.get("edits", [])
+
+    if not spielplaene:
+        raise HTTPException(400, "Keine Spielpläne vorhanden")
+    if not edits:
+        raise HTTPException(400, "Keine Änderungen angegeben")
+
+    for edit in edits:
+        si = edit.get("staffel_idx")
+        st_nr = edit.get("spieltag_nr")
+        sp_idx = edit.get("spiel_idx")
+        fld = edit.get("field", "")
+        val = edit.get("value", "")
+
+        # Staffel finden
+        plan = None
+        for p in spielplaene:
+            if p["staffel_idx"] == si:
+                plan = p
+                break
+        if plan is None:
+            continue
+
+        # Spieltag finden
+        spieltag = None
+        for st in plan["spieltage"]:
+            if st["nummer"] == st_nr:
+                spieltag = st
+                break
+        if spieltag is None:
+            continue
+
+        # Spiel finden
+        if sp_idx < 0 or sp_idx >= len(spieltag["spiele"]):
+            continue
+        spiel = spieltag["spiele"][sp_idx]
+
+        # Änderung anwenden
+        if fld == "datum":
+            spiel["datum"] = val
+        elif fld == "anstosszeit":
+            spiel["anstosszeit"] = val
+        elif fld == "swap_teams":
+            spiel["heim"], spiel["gast"] = spiel["gast"], spiel["heim"]
+            # Spielfeld wechselt zum neuen Heim-Team
+            if val:
+                spiel["spielfeld"] = val
+
+    # Konflikte neu berechnen
+    _recalculate_konflikte(spielplaene)
+
+    return JSONResponse({"spielplaene": spielplaene})
+
+
+def _recalculate_konflikte(spielplaene: list[dict]) -> None:
+    """Berechnet platz_konflikte für JSON-Spielpläne neu."""
+    from collections import defaultdict
+
+    _AK_HALBFELD = {"F-Junioren", "F-Juniorinnen", "E-Junioren", "E-Juniorinnen",
+                     "D-Junioren", "D-Juniorinnen", "Bambini"}
+    _AK_DAUER = {
+        "Bambini": 40, "F-Junioren": 40, "F-Juniorinnen": 40,
+        "E-Junioren": 50, "E-Juniorinnen": 50,
+        "D-Junioren": 60, "D-Juniorinnen": 60,
+        "C-Junioren": 70, "C-Juniorinnen": 70,
+        "B-Junioren": 80, "B-Juniorinnen": 80,
+        "A-Junioren": 90, "A-Juniorinnen": 90,
+    }
+
+    belegung: dict[tuple[str, str], list[tuple[int, int, bool]]] = defaultdict(list)
+
+    for plan in spielplaene:
+        ak = plan.get("altersklasse", "")
+        halbfeld = ak in _AK_HALBFELD
+        dauer = _AK_DAUER.get(ak, 80)
+        for st in plan.get("spieltage", []):
+            for spiel in st.get("spiele", []):
+                feld = (spiel.get("spielfeld") or "").strip().lower()
+                datum = spiel.get("datum") or ""
+                if not feld or not datum:
+                    continue
+                key = (feld, datum)
+                zeit_str = spiel.get("anstosszeit", "") or ""
+                parts = zeit_str.replace(":", ".").split(".")
+                if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                    start = int(parts[0]) * 60 + int(parts[1])
+                else:
+                    start = 720
+                belegung[key].append((start, start + dauer, halbfeld))
+
+    # Konflikte zählen pro (feld, datum)
+    remaining: dict[tuple[str, str], int] = {}
+    for key, entries in belegung.items():
+        entries.sort()
+        konflikte = 0
+        for i in range(len(entries)):
+            for j in range(i + 1, len(entries)):
+                s_i, e_i, hf_i = entries[i]
+                s_j, e_j, hf_j = entries[j]
+                if s_j < e_i:
+                    if hf_i and hf_j and s_i == s_j:
+                        continue
+                    konflikte += 1
+        remaining[key] = konflikte
+
+    # Verteile auf Spielpläne
+    for plan in spielplaene:
+        if not plan.get("score"):
+            continue
+        plan["score"]["platz_konflikte"] = 0
+        ak = plan.get("altersklasse", "")
+        for st in plan.get("spieltage", []):
+            for spiel in st.get("spiele", []):
+                feld = (spiel.get("spielfeld") or "").strip().lower()
+                datum = spiel.get("datum") or ""
+                if not feld or not datum:
+                    continue
+                key = (feld, datum)
+                if remaining.get(key, 0) > 0:
+                    plan["score"]["platz_konflikte"] += 1
+                    remaining[key] -= 1
+
+
+# ─── Spielplan Excel Export ────────────────────────────────────
+
+@app.post("/api/spielplan/export")
+async def api_spielplan_export(request: Request):
+    """Generiert eine Excel-Datei aus den Spielplänen."""
+    data = await request.json()
+    spielplaene = data.get("spielplaene", [])
+    if not spielplaene:
+        raise HTTPException(400, "Keine Spielpläne vorhanden")
+
+    wb = Workbook()
+
+    # ── Styles ──
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    header_fill = PatternFill(start_color="C41230", end_color="C41230", fill_type="solid")
+    spieltag_font = Font(bold=True, size=11, color="C41230")
+    thin_border = Border(bottom=Side(style="thin", color="E5E7EB"))
+    center = Alignment(horizontal="center")
+    wrap = Alignment(wrap_text=True, vertical="center")
+
+    # ── Sheet 1: Übersicht ──
+    ws_ueb = wb.active
+    ws_ueb.title = "Übersicht"
+    ueb_headers = ["Altersklasse", "Topf", "Staffel", "Teams", "Spieltage",
+                    "Spiele", "Konflikte", "Doppelrunde"]
+    for ci, h in enumerate(ueb_headers, 1):
+        cell = ws_ueb.cell(row=1, column=ci, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center
+
+    for ri, p in enumerate(spielplaene, 2):
+        n_spiele = sum(len(st["spiele"]) for st in p["spieltage"])
+        konflikte = p.get("score", {}).get("platz_konflikte", 0) if p.get("score") else 0
+        ws_ueb.cell(row=ri, column=1, value=p["altersklasse"])
+        ws_ueb.cell(row=ri, column=2, value=p["topf"])
+        ws_ueb.cell(row=ri, column=3, value=p["staffel_name"])
+        ws_ueb.cell(row=ri, column=4, value=p["n_teams"]).alignment = center
+        ws_ueb.cell(row=ri, column=5, value=len(p["spieltage"])).alignment = center
+        ws_ueb.cell(row=ri, column=6, value=n_spiele).alignment = center
+        c = ws_ueb.cell(row=ri, column=7, value=konflikte)
+        c.alignment = center
+        if konflikte > 0:
+            c.font = Font(bold=True, color="DC2626")
+        ws_ueb.cell(row=ri, column=8, value="Ja" if p.get("doppelrunde") else "Nein").alignment = center
+
+    for col in ws_ueb.columns:
+        ws_ueb.column_dimensions[col[0].column_letter].width = 16
+
+    # ── Sheets per Spielplan ──
+    for p in spielplaene:
+        sheet_name = f"{p['altersklasse']} {p['staffel_name']}"[:31]
+        ws = wb.create_sheet(title=sheet_name)
+
+        row = 1
+        for st in p["spieltage"]:
+            # Spieltag header
+            datum_str = ""
+            if st.get("datum"):
+                try:
+                    from datetime import date as _date
+                    dt = _date.fromisoformat(st["datum"])
+                    wochentage = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+                    datum_str = f"{wochentage[dt.weekday()]}, {dt.strftime('%d.%m.%Y')}"
+                except (ValueError, IndexError):
+                    datum_str = st["datum"]
+
+            label = f"Spieltag {st['nummer']}  —  {datum_str}"
+            cell = ws.cell(row=row, column=1, value=label)
+            cell.font = spieltag_font
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
+            row += 1
+
+            # Table headers
+            sp_headers = ["Zeit", "Heim", "Gast", "Spielort", "Datum"]
+            for ci, h in enumerate(sp_headers, 1):
+                cell = ws.cell(row=row, column=ci, value=h)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = center
+            row += 1
+
+            # Spiele
+            for spiel in st["spiele"]:
+                datum_spiel = ""
+                if spiel.get("datum"):
+                    try:
+                        dt2 = _date.fromisoformat(spiel["datum"])
+                        datum_spiel = dt2.strftime("%d.%m.%Y")
+                    except ValueError:
+                        datum_spiel = spiel["datum"]
+
+                ws.cell(row=row, column=1, value=spiel.get("anstosszeit", "")).alignment = center
+                ws.cell(row=row, column=2, value=spiel.get("heim", ""))
+                ws.cell(row=row, column=3, value=spiel.get("gast", ""))
+                ws.cell(row=row, column=4, value=spiel.get("spielfeld", ""))
+                ws.cell(row=row, column=5, value=datum_spiel).alignment = center
+                for ci in range(1, 6):
+                    ws.cell(row=row, column=ci).border = thin_border
+                row += 1
+
+            # Spielfrei
+            if st.get("spielfrei"):
+                ws.cell(row=row, column=1, value=f"Spielfrei: {st['spielfrei']}")
+                ws.cell(row=row, column=1).font = Font(italic=True, color="888888")
+                row += 1
+
+            row += 1  # empty row
+
+        # Column widths
+        ws.column_dimensions["A"].width = 10
+        ws.column_dimensions["B"].width = 28
+        ws.column_dimensions["C"].width = 28
+        ws.column_dimensions["D"].width = 36
+        ws.column_dimensions["E"].width = 14
+
+    # Save to temp file
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    wb.save(tmp.name)
+    tmp.close()
+
+    return FileResponse(
+        tmp.name,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="Spielplaene.xlsx",
+    )
+
+
 # ─── Schneller Wünsche-Parser (Regex, kein LLM) ───────────────
 
 import re as _re

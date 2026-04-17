@@ -748,7 +748,7 @@ table.teams-table {
 
 .spiel-list-header {
     display: grid;
-    grid-template-columns: 70px 1fr 160px;
+    grid-template-columns: 70px 1fr 160px 60px;
     gap: 0.5rem;
     padding: 0.4rem 1rem;
     font-size: 0.72rem;
@@ -767,7 +767,7 @@ table.teams-table {
 
 .spiel-row {
     display: grid;
-    grid-template-columns: 70px 1fr 160px;
+    grid-template-columns: 70px 1fr 160px 60px;
     gap: 0.5rem;
     padding: 0.5rem 1rem;
     align-items: center;
@@ -847,7 +847,7 @@ table.teams-table {
 @media (max-width: 768px) {
     .spiel-list-header,
     .spiel-row {
-        grid-template-columns: 55px 1fr 100px;
+        grid-template-columns: 55px 1fr 100px 50px;
     }
     .spieltage-list {
         gap: 0.75rem;
@@ -896,6 +896,155 @@ table.teams-table {
 
 .toast-success { background: var(--success); }
 .toast-error { background: var(--danger); }
+
+/* ─── Edit Game Modal ──────────────────────────────────────── */
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+}
+
+.modal {
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    width: 90%;
+    max-width: 480px;
+    overflow: hidden;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    background: var(--bg-dark);
+    color: #fff;
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 1.5rem;
+    cursor: pointer;
+    line-height: 1;
+    opacity: 0.7;
+    transition: opacity var(--transition);
+}
+
+.modal-close:hover {
+    opacity: 1;
+}
+
+.modal-body {
+    padding: 1.25rem;
+}
+
+.modal-info {
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background: var(--bg);
+    border-radius: var(--radius);
+    font-size: 0.88rem;
+}
+
+.modal-info strong {
+    color: var(--accent);
+}
+
+.edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.form-group label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.form-input {
+    padding: 0.55rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 0.9rem;
+    background: var(--bg);
+    color: var(--text);
+    transition: border-color var(--transition);
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(196, 18, 48, 0.1);
+}
+
+.form-group label input[type="checkbox"] {
+    margin-right: 0.5rem;
+    accent-color: var(--accent);
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 1rem 1.25rem;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+}
+
+/* Edit button on game rows */
+.spiel-edit-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.25rem 0.5rem;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition);
+    white-space: nowrap;
+}
+
+.spiel-edit-btn:hover {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.spiel-row-edited {
+    background: rgba(196, 18, 48, 0.04) !important;
+    border-left: 3px solid var(--accent);
+}
+
+@media (max-width: 768px) {
+    .spiel-list-header,
+    .spiel-row {
+        grid-template-columns: 55px 1fr 100px 50px;
+    }
+}
 
 /* â”€â”€â”€ Responsive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 

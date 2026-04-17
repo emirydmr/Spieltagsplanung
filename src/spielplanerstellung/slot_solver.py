@@ -183,6 +183,10 @@ def solve_game_slots(
             print(f"[CP-SAT] Gruppe {i+1}/{n_groups}: "
                   f"{dt} ({len(games)} Spiele, {changes} Änderungen)")
 
+    # ── Zweiter Pass: Repariere cross-date Konflikte ──────────
+    repair_changes = _repair_cross_date_conflicts(plaene, wuensche, time_limit_seconds=30)
+    total_changes += repair_changes
+
     print(f"[CP-SAT] Fertig in {_time.time() - t0:.1f}s, "
           f"{total_changes} Spiele geändert")
 
@@ -464,4 +468,74 @@ def _solve_and_apply(
         if changed:
             changes += 1
 
+    return changes
+
+
+# ─── 5. Reparatur-Pass für cross-date Konflikte ───────────────
+
+
+def _repair_cross_date_conflicts(
+    plaene: list[StaffelSpielplan],
+    wuensche: dict[str, list[Wunsch]] | None = None,
+    time_limit_seconds: int = 30,
+) -> int:
+    """Zweiter CP-SAT-Pass: löst Konflikte, die durch date-shifting entstanden.
+
+    Nach Pass 1 können Spiele, die auf alternative Tage verschoben wurden,
+    mit Spielen kollidieren, die für diesen Tag separat gelöst wurden.
+    Dieser Pass gruppiert nach tatsächlichem Datum und re-optimiert nur Gruppen
+    mit Konflikten.
+    """
+    # Baue aktuelle Belegung: (venue, datum) → [games]
+    all_games = _collect_games(plaene)
+    if not all_games:
+        return 0
+
+    # Finde Konflikte auf aktuellem Stand
+    belegung: dict[tuple[str, str], list[_GameInfo]] = defaultdict(list)
+    for g in all_games:
+        if not g.spiel.spielfeld or not g.spiel.datum:
+            continue
+        venue = g.spiel.spielfeld.strip().lower()
+        dt_iso = g.spiel.datum.isoformat()
+        belegung[(venue, dt_iso)].append(g)
+
+    # Prüfe welche (venue, datum) Konflikte haben
+    conflict_dates: set[date] = set()
+    for (venue, dt_iso), games in belegung.items():
+        if len(games) < 2:
+            continue
+        entries = []
+        for g in games:
+            zeit = _parse_time(g.spiel.anstosszeit)
+            start = zeit[0] * 60 + zeit[1] if zeit else 720
+            entries.append((start, start + g.duration, g.halbfeld))
+        entries.sort()
+        for i in range(len(entries)):
+            for j in range(i + 1, len(entries)):
+                s_i, e_i, hf_i = entries[i]
+                s_j, e_j, hf_j = entries[j]
+                if s_j < e_i:
+                    if hf_i and hf_j and s_i == s_j:
+                        continue
+                    conflict_dates.add(date.fromisoformat(dt_iso))
+
+    if not conflict_dates:
+        return 0
+
+    print(f"[CP-SAT] Reparatur-Pass: {len(conflict_dates)} Datumgruppen mit Konflikten")
+
+    # Sammle alle Spiele an Konflikttagen (nicht nur die kollidierenden)
+    conflict_games = [g for g in all_games if g.spiel.datum in conflict_dates]
+    _generate_options(conflict_games, wuensche=wuensche)
+    conflict_games = [g for g in conflict_games if g.options]
+
+    if not conflict_games:
+        return 0
+
+    # Löse global (alle Konflikttage zusammen – sollte klein sein)
+    model = cp_model.CpModel()
+    _build_model(model, conflict_games)
+    changes = _solve_and_apply(model, conflict_games, time_limit_seconds)
+    print(f"[CP-SAT] Reparatur: {changes} Spiele angepasst")
     return changes

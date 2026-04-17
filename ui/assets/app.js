@@ -630,8 +630,20 @@
     const btnSpBack = $('#btnSpBack');
     const btnSpExpandAll = $('#btnSpExpandAll');
     const btnSpCollapseAll = $('#btnSpCollapseAll');
+    const btnSpExport = $('#btnSpExport');
+
+    // Edit modal refs
+    const editModal = $('#editModal');
+    const editModalClose = $('#editModalClose');
+    const editModalCancel = $('#editModalCancel');
+    const editModalSave = $('#editModalSave');
+    const editModalInfo = $('#editModalInfo');
+    const editDatum = $('#editDatum');
+    const editZeit = $('#editZeit');
+    const editSwap = $('#editSwap');
 
     let spielplanData = null;
+    let currentEdit = null; // {staffel_idx, spieltag_nr, spiel_idx, spiel}
 
     // Enable generate button when einteilung exists
     function updateSpielplanStatus() {
@@ -775,11 +787,11 @@
                     ? new Date(st.datum).toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })
                     : 'Termin offen';
 
-                const spieleRows = st.spiele.map(s => {
+                const spieleRows = st.spiele.map((s, si) => {
                     const sZeit = s.anstosszeit || '–';
                     const ort = s.spielfeld ? s.spielfeld.split(', ').pop() : '–';
                     return `
-                        <div class="spiel-row">
+                        <div class="spiel-row" data-staffel="${plan.staffel_idx}" data-st="${st.nummer}" data-si="${si}">
                             <div class="spiel-zeit-col">${sZeit}</div>
                             <div class="spiel-paarung">
                                 <span class="spiel-heim">${s.heim}</span>
@@ -787,6 +799,9 @@
                                 <span class="spiel-gast">${s.gast}</span>
                             </div>
                             <div class="spiel-ort-col" title="${s.spielfeld || ''}">${ort}</div>
+                            <div class="spiel-actions">
+                                <button class="spiel-edit-btn" onclick="openEditModal(${plan.staffel_idx}, ${st.nummer}, ${si})">✎</button>
+                            </div>
                         </div>
                     `;
                 }).join('');
@@ -804,6 +819,7 @@
                             <div class="spiel-zeit-col">Zeit</div>
                             <div class="spiel-paarung">Paarung</div>
                             <div class="spiel-ort-col">Spielort</div>
+                            <div></div>
                         </div>
                         <div class="spiel-list">
                             ${spieleRows}
@@ -861,4 +877,141 @@
     btnSpCollapseAll.addEventListener('click', () => {
         document.querySelectorAll('#spielplanContainer .gruppe').forEach(g => g.classList.remove('open'));
     });
+
+    // ─── Edit Modal Logic ─────────────────────────────────────
+    // Make openEditModal global so inline onclick works
+    window.openEditModal = function (staffelIdx, spieltagNr, spielIdx) {
+        if (!spielplanData) return;
+
+        const plan = spielplanData.spielplaene.find(p => p.staffel_idx === staffelIdx);
+        if (!plan) return;
+        const spieltag = plan.spieltage.find(st => st.nummer === spieltagNr);
+        if (!spieltag) return;
+        const spiel = spieltag.spiele[spielIdx];
+        if (!spiel) return;
+
+        currentEdit = { staffel_idx: staffelIdx, spieltag_nr: spieltagNr, spiel_idx: spielIdx, spiel };
+
+        editModalInfo.innerHTML = `
+            <strong>${spiel.heim}</strong> – ${spiel.gast}<br>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">
+                ${plan.altersklasse} ${plan.staffel_name} · Spieltag ${spieltagNr}
+            </span>
+        `;
+
+        editDatum.value = spiel.datum || '';
+        editZeit.value = spiel.anstosszeit || '';
+        editSwap.checked = false;
+
+        editModal.style.display = 'flex';
+    };
+
+    function closeEditModal() {
+        editModal.style.display = 'none';
+        currentEdit = null;
+    }
+
+    editModalClose.addEventListener('click', closeEditModal);
+    editModalCancel.addEventListener('click', closeEditModal);
+
+    editModal.addEventListener('click', (e) => {
+        if (e.target === editModal) closeEditModal();
+    });
+
+    editModalSave.addEventListener('click', async () => {
+        if (!currentEdit || !spielplanData) return;
+
+        const edits = [];
+        const s = currentEdit.spiel;
+
+        // Check what changed
+        if (editDatum.value && editDatum.value !== s.datum) {
+            edits.push({
+                staffel_idx: currentEdit.staffel_idx,
+                spieltag_nr: currentEdit.spieltag_nr,
+                spiel_idx: currentEdit.spiel_idx,
+                field: 'datum',
+                value: editDatum.value,
+            });
+        }
+
+        if (editZeit.value && editZeit.value !== s.anstosszeit) {
+            edits.push({
+                staffel_idx: currentEdit.staffel_idx,
+                spieltag_nr: currentEdit.spieltag_nr,
+                spiel_idx: currentEdit.spiel_idx,
+                field: 'anstosszeit',
+                value: editZeit.value,
+            });
+        }
+
+        if (editSwap.checked) {
+            edits.push({
+                staffel_idx: currentEdit.staffel_idx,
+                spieltag_nr: currentEdit.spieltag_nr,
+                spiel_idx: currentEdit.spiel_idx,
+                field: 'swap_teams',
+                value: '',
+            });
+        }
+
+        if (edits.length === 0) {
+            closeEditModal();
+            return;
+        }
+
+        try {
+            const resp = await fetch('/api/spielplan/edit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    spielplaene: spielplanData.spielplaene,
+                    edits: edits,
+                }),
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.detail || 'Server-Fehler');
+            }
+
+            const result = await resp.json();
+            spielplanData.spielplaene = result.spielplaene;
+            renderSpielplanResults(spielplanData);
+            closeEditModal();
+            showToast('Spiel aktualisiert', 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    });
+
+    // ─── Excel Export ─────────────────────────────────────────
+    btnSpExport.addEventListener('click', async () => {
+        if (!spielplanData || !spielplanData.spielplaene.length) return;
+
+        try {
+            const resp = await fetch('/api/spielplan/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ spielplaene: spielplanData.spielplaene }),
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.detail || 'Export fehlgeschlagen');
+            }
+
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'Spielplaene.xlsx';
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Excel exported!', 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    });
+
 })();
