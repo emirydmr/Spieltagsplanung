@@ -141,7 +141,8 @@ _PENALTY_ALT_WEEKDAY  = 30   # Ausweichen auf Wochentag
 _PENALTY_SWAP         = 20   # Heim/Auswärts-Tausch
 _PENALTY_TIME_PER_15  = 1    # je 15 min Abweichung von Wunschzeit
 _PENALTY_SPERRTAG     = 200  # Spiel auf Sperrtag (hart: verboten, weich: Strafe)
-_PENALTY_WOCHENTAG    = 50   # Spiel nicht am Wunschwochentag (pro Team)
+_PENALTY_WOCHENTAG    = 80   # Spiel nicht am Wunschwochentag (pro Team)
+_BONUS_WOCHENTAG      = -20  # Bonus für Treffen des Wunschwochentags
 
 
 # ─── Solver ────────────────────────────────────────────────────
@@ -330,9 +331,12 @@ def _generate_options(
             if sperr_prio == WunschPrio.WEICH:
                 date_pen += _PENALTY_SPERRTAG
 
-            # Wunschwochentag nicht getroffen → Strafe
-            if wunsch_wochentage and dt.weekday() not in wunsch_wochentage:
-                date_pen += _PENALTY_WOCHENTAG
+            # Wunschwochentag: Strafe wenn nicht getroffen, Bonus wenn getroffen
+            if wunsch_wochentage:
+                if dt.weekday() not in wunsch_wochentage:
+                    date_pen += _PENALTY_WOCHENTAG
+                else:
+                    date_pen += _BONUS_WOCHENTAG  # negativ = Bonus
 
             # Option A: Heim-Venue (kein Tausch)
             if g.heim_venue:

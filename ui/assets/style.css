@@ -465,7 +465,6 @@ h1, h2, h3, h4, h5 {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     margin-bottom: 0.75rem;
-    overflow: hidden;
     transition: box-shadow var(--transition);
 }
 
@@ -1098,6 +1097,23 @@ table.teams-table {
 
 .tooltip-line-orange {
     color: #b45309;
+}
+
+/* Inline conflict info under game row */
+.spiel-conflict-info {
+    padding: 4px 12px 6px 16px;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: #b45309;
+    border-left: 3px solid var(--warning);
+    background: rgba(217, 119, 6, 0.04);
+    margin-bottom: 2px;
+}
+
+.spiel-row-conflict-platz + .spiel-conflict-info {
+    color: var(--danger);
+    border-left-color: var(--danger);
+    background: rgba(220, 38, 38, 0.04);
 }
 
 @media (max-width: 768px) {
