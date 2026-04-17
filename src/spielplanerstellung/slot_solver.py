@@ -122,7 +122,7 @@ _PENALTY_ALT_WEEKDAY  = 30   # Ausweichen auf Wochentag
 _PENALTY_SWAP         = 20   # Heim/Auswärts-Tausch
 _PENALTY_TIME_PER_15  = 1    # je 15 min Abweichung von Wunschzeit
 _PENALTY_SPERRTAG     = 200  # Spiel auf Sperrtag (hart: verboten, weich: Strafe)
-_PENALTY_WOCHENTAG    = 15   # Spiel nicht am Wunschwochentag
+_PENALTY_WOCHENTAG    = 50   # Spiel nicht am Wunschwochentag (pro Team)
 
 
 # ─── Solver ────────────────────────────────────────────────────
@@ -267,13 +267,22 @@ def _generate_options(
                 if existing != WunschPrio.HART:
                     sperrtage[w.datum] = w.prioritaet
 
-        # Wunschwochentage extrahieren (nur Heim-Team relevant)
+        # Wunschwochentage extrahieren (Heim- UND Gast-Team)
         wunsch_wochentage: set[int] = set()
-        for w in heim_w:
+        for w in heim_w + gast_w:
             if w.kategorie == WunschKategorie.WOCHENTAG and w.wochentag:
                 wd_nr = _WOCHENTAG_MAP.get(w.wochentag.lower())
                 if wd_nr is not None:
                     wunsch_wochentage.add(wd_nr)
+
+        # Wunsch-Anstoßzeit extrahieren (Heim- UND Gast-Team)
+        wunsch_zeit_min: int | None = None
+        for w in heim_w + gast_w:
+            if w.kategorie == WunschKategorie.ANSTOSSZEIT and w.uhrzeit:
+                parts = w.uhrzeit.replace(":", ".").split(".")
+                if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                    wunsch_zeit_min = int(parts[0]) * 60 + int(parts[1])
+                    break
 
         for dt, dt_type in alt_dates:
             earliest, latest = _time_range(dt)
@@ -327,6 +336,10 @@ def _generate_options(
                     is_swap=True,
                     penalty=date_pen + _PENALTY_SWAP,
                 ))
+
+        # Wunsch-Anstoßzeit überschreibt preferred_start
+        if wunsch_zeit_min is not None:
+            g.preferred_start = wunsch_zeit_min
 
 
 # ─── 3. CP-SAT Modell ─────────────────────────────────────────

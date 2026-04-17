@@ -266,9 +266,8 @@ def generiere_alle_spielplaene(
 
 def _update_platz_konflikte(plaene: list[StaffelSpielplan]) -> None:
     """Zählt verbleibende Spielfeld-Konflikte nach der Auflösung und aktualisiert Scores."""
-    # Sammle alle Spiele → (feld, datum) → [(zeit_start, zeit_end, halbfeld)]
     from collections import defaultdict
-    belegung: dict[tuple[str, str], list[tuple[int, int, bool]]] = defaultdict(list)
+    belegung: dict[tuple[str, str], list[tuple[int, int, bool, str, str]]] = defaultdict(list)
 
     for plan in plaene:
         halbfeld = _ist_halbfeld(plan.altersklasse)
@@ -280,38 +279,44 @@ def _update_platz_konflikte(plaene: list[StaffelSpielplan]) -> None:
                 key = (spiel.spielfeld.strip().lower(), spiel.datum.isoformat())
                 zeit = _parse_time(spiel.anstosszeit)
                 start = zeit[0] * 60 + zeit[1] if zeit else 720
-                belegung[key].append((start, start + dauer, halbfeld))
+                belegung[key].append((start, start + dauer, halbfeld,
+                                      f"{spiel.heim} vs {spiel.gast}",
+                                      spiel.anstosszeit or "?"))
 
-    # Zähle Konflikte pro Feld/Datum
-    remaining: dict[tuple[str, str], int] = {}
+    # Konflikte pro (feld, datum) mit Details
+    remaining: dict[tuple[str, str], list[str]] = {}
     for key, entries in belegung.items():
         entries.sort()
-        konflikte = 0
+        details: list[str] = []
         for i in range(len(entries)):
             for j in range(i + 1, len(entries)):
-                s_i, e_i, hf_i = entries[i]
-                s_j, e_j, hf_j = entries[j]
-                # Überlappung?
+                s_i, e_i, hf_i, name_i, zeit_i = entries[i]
+                s_j, e_j, hf_j, name_j, zeit_j = entries[j]
                 if s_j < e_i:
-                    # Halbfeld: 2 gleichzeitig OK
                     if hf_i and hf_j and s_i == s_j:
                         continue
-                    konflikte += 1
-        remaining[key] = konflikte
+                    details.append(f"Zeitüberlappung: {name_i} ({zeit_i}) & {name_j} ({zeit_j})")
+        remaining[key] = details
 
-    # Verteile auf Staffeln: Jede Staffel bekommt die Konflikte ihrer Heimspiele
     for plan in plaene:
         if not plan.score:
             continue
         plan.score.platz_konflikte = 0
+        plan.score.platz_konflikt_details = []
         for st in plan.spieltage:
             for spiel in st.spiele:
                 if not spiel.spielfeld or not spiel.datum:
                     continue
                 key = (spiel.spielfeld.strip().lower(), spiel.datum.isoformat())
-                if remaining.get(key, 0) > 0:
+                if remaining.get(key):
                     plan.score.platz_konflikte += 1
-                    remaining[key] -= 1
+                    detail = remaining[key].pop(0)
+                    ort = spiel.spielfeld.split(", ")[-1] if ", " in spiel.spielfeld else spiel.spielfeld
+                    plan.score.platz_konflikt_details.append({
+                        "datum": spiel.datum.isoformat(),
+                        "ort": ort,
+                        "grund": detail,
+                    })
         plan.score.berechne_total()
 
 
@@ -319,12 +324,7 @@ def _update_wunsch_verletzungen(
     plaene: list[StaffelSpielplan],
     wuensche: dict[str, list[Wunsch]],
 ) -> None:
-    """Berechnet Wunsch-Verletzungen neu basierend auf tatsächlichen Spiel-Daten nach CP-SAT.
-
-    Die SZ-Vergabe berechnet Wunsch-Verletzungen gegen Spieltag-Daten (vor CP-SAT).
-    Nach CP-SAT haben Spiele ggf. andere Daten (z.B. verschoben von Sonntag auf Samstag).
-    Diese Funktion prüft gegen die tatsächlichen spiel.datum-Werte.
-    """
+    """Berechnet Wunsch-Verletzungen neu basierend auf tatsächlichen Spiel-Daten nach CP-SAT."""
     from src.spielplanerstellung.wuensche import WunschKategorie, WunschPrio
 
     _WT_MAP = {
@@ -332,13 +332,12 @@ def _update_wunsch_verletzungen(
         "freitag": 4, "samstag": 5, "sonntag": 6,
         "mo": 0, "di": 1, "mi": 2, "do": 3, "fr": 4, "sa": 5, "so": 6,
     }
+    _WT_NAMES = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
 
     for plan in plaene:
         if not plan.score:
             continue
 
-        # Sammle alle tatsächlichen Spiel-Daten pro Mannschaft
-        # team_games[mannschaft] = [(datum, rolle, spieltag_nr)]
         team_games: dict[str, list[tuple[date, str]]] = {}
         for st in plan.spieltage:
             for spiel in st.spiele:
@@ -348,6 +347,8 @@ def _update_wunsch_verletzungen(
                 team_games.setdefault(spiel.gast, []).append((spiel.datum, "gast"))
 
         violations = 0
+        details: list[dict] = []
+
         for mannschaft, games in team_games.items():
             team_w = wuensche.get(mannschaft, [])
             for w in team_w:
@@ -361,7 +362,12 @@ def _update_wunsch_verletzungen(
                     for g_datum, _ in games:
                         if g_datum == sperr:
                             violations += pen
-                            break  # einmal pro Wunsch reicht
+                            details.append({
+                                "team": mannschaft,
+                                "typ": "Sperrtag",
+                                "grund": f"Spiel am {sperr.strftime('%d.%m.%Y')} trotz Sperrtag",
+                            })
+                            break
 
                 elif w.kategorie == WunschKategorie.WOCHENTAG and w.wochentag:
                     gewuenscht = _WT_MAP.get(w.wochentag.strip().lower())
@@ -370,6 +376,11 @@ def _update_wunsch_verletzungen(
                     for g_datum, _ in games:
                         if g_datum.weekday() != gewuenscht:
                             violations += pen
+                            details.append({
+                                "team": mannschaft,
+                                "typ": "Wochentag",
+                                "grund": f"Spiel am {_WT_NAMES[g_datum.weekday()]} {g_datum.strftime('%d.%m.')} statt {w.wochentag}",
+                            })
 
                 elif w.kategorie == WunschKategorie.HEIMWUNSCH and w.datum:
                     try:
@@ -379,6 +390,11 @@ def _update_wunsch_verletzungen(
                     for g_datum, rolle in games:
                         if g_datum == wunsch_date and rolle != "heim":
                             violations += pen
+                            details.append({
+                                "team": mannschaft,
+                                "typ": "Heimwunsch",
+                                "grund": f"Auswärts statt Heim am {wunsch_date.strftime('%d.%m.%Y')}",
+                            })
 
                 elif w.kategorie == WunschKategorie.AUSWAERTSWUNSCH and w.datum:
                     try:
@@ -388,8 +404,14 @@ def _update_wunsch_verletzungen(
                     for g_datum, rolle in games:
                         if g_datum == wunsch_date and rolle != "gast":
                             violations += pen
+                            details.append({
+                                "team": mannschaft,
+                                "typ": "Auswärtswunsch",
+                                "grund": f"Heim statt Auswärts am {wunsch_date.strftime('%d.%m.%Y')}",
+                            })
 
         plan.score.wunsch_verletzungen = violations
+        plan.score.wunsch_details = details
         plan.score.berechne_total()
 
 
@@ -646,6 +668,8 @@ def spielplan_to_dict(plan: StaffelSpielplan) -> dict:
             "distanz_fairness": round(plan.score.distanz_fairness, 1),
             "wunsch_verletzungen": plan.score.wunsch_verletzungen,
             "platz_konflikte": plan.score.platz_konflikte,
+            "wunsch_details": plan.score.wunsch_details,
+            "platz_konflikt_details": plan.score.platz_konflikt_details,
         } if plan.score else None,
         "spieltage": [
             {

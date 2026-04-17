@@ -56,6 +56,8 @@ class SpielplanScore:
     distanz_fairness: float = 0.0   # Wie fair Auswärtskm verteilt sind
     wunsch_verletzungen: int = 0    # Anzahl verletzter Wünsche
     platz_konflikte: int = 0        # Doppelbelegungen am gleichen Tag
+    wunsch_details: list = field(default_factory=list)  # Details pro Verletzung
+    platz_konflikt_details: list = field(default_factory=list)  # Details pro Konflikt
 
     def berechne_total(self) -> float:
         self.total = (

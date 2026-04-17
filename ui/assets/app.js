@@ -782,9 +782,19 @@
 
             const konflikte = plan.score ? plan.score.platz_konflikte : 0;
             const wunschV = plan.score ? plan.score.wunsch_verletzungen : 0;
+            const platzDetails = (plan.score && plan.score.platz_konflikt_details) || [];
+            const wunschDetails = (plan.score && plan.score.wunsch_details) || [];
+
             const badges = [];
-            if (konflikte > 0) badges.push(`<span class="gruppe-badge badge-red">${konflikte} Platz-Konflikt${konflikte !== 1 ? 'e' : ''}</span>`);
-            if (wunschV > 0) badges.push(`<span class="gruppe-badge badge-orange">${wunschV} Wunsch-Verl.</span>`);
+            if (konflikte > 0) {
+                const platzTooltip = platzDetails.map(d => `${d.ort}: ${d.grund}`).join('\n');
+                badges.push(`<span class="gruppe-badge badge-red" title="${platzTooltip.replace(/"/g, '&quot;')}" style="cursor:help">${konflikte} Platz-Konflikt${konflikte !== 1 ? 'e' : ''}</span>`);
+            }
+            if (wunschV > 0) {
+                const wunschTooltip = wunschDetails.slice(0, 20).map(d => `${d.team}: ${d.grund}`).join('\n')
+                    + (wunschDetails.length > 20 ? `\n... und ${wunschDetails.length - 20} weitere` : '');
+                badges.push(`<span class="gruppe-badge badge-orange" title="${wunschTooltip.replace(/"/g, '&quot;')}" style="cursor:help">${wunschV} Wunsch-Verl.</span>`);
+            }
             if (badges.length === 0) badges.push(`<span class="gruppe-badge badge-ok">Keine Konflikte</span>`);
             const problemBadge = badges.join(' ');
 
