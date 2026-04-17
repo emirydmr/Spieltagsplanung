@@ -25,6 +25,9 @@ from src.spielplanerstellung.spielplan import (
     _find_adresse, _get_spieldauer_min, _ist_halbfeld,
     _parse_time, _format_time,
 )
+from src.spielplanerstellung.wuensche import (
+    Wunsch, WunschKategorie, WunschPrio,
+)
 
 
 # ─── Datenstrukturen ──────────────────────────────────────────
@@ -118,12 +121,23 @@ _PENALTY_ALT_WEEKEND  = 10   # Ausweichen auf anderes WE-Datum
 _PENALTY_ALT_WEEKDAY  = 30   # Ausweichen auf Wochentag
 _PENALTY_SWAP         = 20   # Heim/Auswärts-Tausch
 _PENALTY_TIME_PER_15  = 1    # je 15 min Abweichung von Wunschzeit
+_PENALTY_SPERRTAG     = 200  # Spiel auf Sperrtag (hart: verboten, weich: Strafe)
+_PENALTY_WOCHENTAG    = 15   # Spiel nicht am Wunschwochentag
 
 
 # ─── Solver ────────────────────────────────────────────────────
 
+# Wochentag-Name → date.weekday()
+_WOCHENTAG_MAP = {
+    "montag": 0, "dienstag": 1, "mittwoch": 2, "donnerstag": 3,
+    "freitag": 4, "samstag": 5, "sonntag": 6,
+    "mo": 0, "di": 1, "mi": 2, "do": 3, "fr": 4, "sa": 5, "so": 6,
+}
+
+
 def solve_game_slots(
     plaene: list[StaffelSpielplan],
+    wuensche: dict[str, list[Wunsch]] | None = None,
     time_limit_seconds: int = 120,
 ) -> int:
     """Weist allen Spielen konfliktfreie Slots zu (CP-SAT).
@@ -140,7 +154,7 @@ def solve_game_slots(
     if not all_games:
         return 0
 
-    _generate_options(all_games)
+    _generate_options(all_games, wuensche=wuensche)
 
     # Nur Spiele mit gültigen Optionen
     all_games = [g for g in all_games if g.options]
@@ -219,11 +233,43 @@ def _collect_games(plaene: list[StaffelSpielplan]) -> list[_GameInfo]:
 
 # ─── 2. Optionen pro Spiel ────────────────────────────────────
 
-def _generate_options(games: list[_GameInfo]) -> None:
-    """Erzeugt für jedes Spiel die möglichen (Datum, Venue, Zeitbereich)-Kandidaten."""
+def _generate_options(
+    games: list[_GameInfo],
+    wuensche: dict[str, list[Wunsch]] | None = None,
+) -> None:
+    """Erzeugt für jedes Spiel die möglichen (Datum, Venue, Zeitbereich)-Kandidaten.
+
+    Berücksichtigt Vereinswünsche:
+      - SPERRTAG/HART: Option wird komplett ausgeschlossen
+      - SPERRTAG/WEICH: Hohe Strafe
+      - WOCHENTAG: Strafe wenn Datum nicht am Wunschwochentag
+    """
+    wuensche = wuensche or {}
+
     for g in games:
         primary_date = g.spiel.datum
         alt_dates = _get_alternative_dates(primary_date)
+
+        # Wünsche für Heim- und Gast-Team sammeln
+        heim_w = wuensche.get(g.spiel.heim, [])
+        gast_w = wuensche.get(g.spiel.gast, [])
+
+        # Sperrtage extrahieren: {iso_datum: prio}
+        sperrtage: dict[str, WunschPrio] = {}
+        for w in heim_w + gast_w:
+            if w.kategorie == WunschKategorie.SPERRTAG and w.datum:
+                existing = sperrtage.get(w.datum)
+                # HART überschreibt WEICH
+                if existing != WunschPrio.HART:
+                    sperrtage[w.datum] = w.prioritaet
+
+        # Wunschwochentage extrahieren (nur Heim-Team relevant)
+        wunsch_wochentage: set[int] = set()
+        for w in heim_w:
+            if w.kategorie == WunschKategorie.WOCHENTAG and w.wochentag:
+                wd_nr = _WOCHENTAG_MAP.get(w.wochentag.lower())
+                if wd_nr is not None:
+                    wunsch_wochentage.add(wd_nr)
 
         for dt, dt_type in alt_dates:
             earliest, latest = _time_range(dt)
@@ -232,11 +278,27 @@ def _generate_options(games: list[_GameInfo]) -> None:
             if earliest + g.duration > latest + g.duration:
                 continue
 
+            # --- Wünsche-Prüfung pro Datum ---
+            dt_iso = dt.isoformat()
+            sperr_prio = sperrtage.get(dt_iso)
+
+            if sperr_prio == WunschPrio.HART:
+                # Harter Sperrtag → Datum komplett ausschließen
+                continue
+
             date_pen = {
                 "primary": 0,
                 "weekend": _PENALTY_ALT_WEEKEND,
                 "weekday": _PENALTY_ALT_WEEKDAY,
             }[dt_type]
+
+            # Weicher Sperrtag → hohe Strafe
+            if sperr_prio == WunschPrio.WEICH:
+                date_pen += _PENALTY_SPERRTAG
+
+            # Wunschwochentag nicht getroffen → Strafe
+            if wunsch_wochentage and dt.weekday() not in wunsch_wochentage:
+                date_pen += _PENALTY_WOCHENTAG
 
             # Option A: Heim-Venue (kein Tausch)
             if g.heim_venue:

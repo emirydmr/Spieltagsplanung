@@ -252,7 +252,7 @@ def generiere_alle_spielplaene(
 
     # CP-SAT Slot-Vergabe: globale Optimierung, konfliktfrei
     from src.spielplanerstellung.slot_solver import solve_game_slots
-    solve_game_slots(alle_plaene, time_limit_seconds=120)
+    solve_game_slots(alle_plaene, wuensche=wuensche, time_limit_seconds=120)
 
     # Zähle verbleibende Konflikte (sollte 0 oder nahe 0 sein)
     _update_platz_konflikte(alle_plaene)

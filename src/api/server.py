@@ -7,6 +7,8 @@ Starten:
 import sys
 import tempfile
 import shutil
+import json
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
@@ -27,6 +29,10 @@ from src.spielplanerstellung.wuensche import Wunsch, WunschKategorie, WunschPrio
 from src.spielplanerstellung.spielplan import generiere_alle_spielplaene, spielplan_to_dict
 
 app = FastAPI(title="Spieltagsplaner", version="1.0")
+
+# Verzeichnis für gespeicherte Spielpläne
+SPIELPLAN_DIR = ROOT / "spielplan_logs"
+SPIELPLAN_DIR.mkdir(exist_ok=True)
 
 # Static files
 UI_DIR = ROOT / "ui"
@@ -344,15 +350,81 @@ async def api_spielplan(request: Request):
         plaene = generiere_alle_spielplaene(
             einteilung, wuensche=wuensche if wuensche else None,
         )
-        # Count resolved changes (staggered times + H/A swaps)
-        resolved = sum(1 for p in plaene for st in p.spieltage for s in st.spiele if s.spielfeld)
-        return JSONResponse({
+        result = {
             "spielplaene": [spielplan_to_dict(p) for p in plaene],
             "total_staffeln": len(plaene),
             "wuensche_parsed": len(wuensche),
-        })
+        }
+
+        # Spielplan persistent speichern
+        _save_spielplan_log(result, saison)
+
+        return JSONResponse(result)
     except Exception as e:
         raise HTTPException(500, f"Fehler bei Spielplan-Generierung: {str(e)}")
+
+
+def _save_spielplan_log(result: dict, saison: str) -> Path:
+    """Speichert das Spielplan-Ergebnis als JSON-Datei mit Metadaten."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    total_konflikte = sum(
+        p.get("score", {}).get("platz_konflikte", 0)
+        for p in result.get("spielplaene", []) if p.get("score")
+    )
+    total_spiele = sum(
+        len(s["spiele"])
+        for p in result.get("spielplaene", []) for s in p["spieltage"]
+    )
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "saison": saison,
+        "total_staffeln": result.get("total_staffeln", 0),
+        "total_spiele": total_spiele,
+        "total_konflikte": total_konflikte,
+        "wuensche_parsed": result.get("wuensche_parsed", 0),
+        "spielplaene": result.get("spielplaene", []),
+    }
+
+    filename = f"spielplan_{ts}.json"
+    filepath = SPIELPLAN_DIR / filename
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(log_entry, f, ensure_ascii=False, indent=1)
+    print(f"[LOG] Spielplan gespeichert: {filepath.name} "
+          f"({total_spiele} Spiele, {total_konflikte} Konflikte)")
+    return filepath
+
+
+@app.get("/api/spielplan/history")
+async def api_spielplan_history():
+    """Gibt eine Liste aller gespeicherten Spielpläne zurück (ohne Detaildaten)."""
+    entries = []
+    for fp in sorted(SPIELPLAN_DIR.glob("spielplan_*.json"), reverse=True):
+        try:
+            with open(fp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            entries.append({
+                "filename": fp.name,
+                "timestamp": data.get("timestamp", ""),
+                "saison": data.get("saison", ""),
+                "total_staffeln": data.get("total_staffeln", 0),
+                "total_spiele": data.get("total_spiele", 0),
+                "total_konflikte": data.get("total_konflikte", 0),
+                "wuensche_parsed": data.get("wuensche_parsed", 0),
+            })
+        except (json.JSONDecodeError, KeyError):
+            continue
+    return JSONResponse({"history": entries})
+
+
+@app.get("/api/spielplan/history/{filename}")
+async def api_spielplan_load(filename: str):
+    """Lädt einen bestimmten gespeicherten Spielplan."""
+    filepath = SPIELPLAN_DIR / filename
+    if not filepath.exists() or not filepath.name.startswith("spielplan_"):
+        raise HTTPException(404, "Spielplan nicht gefunden")
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return JSONResponse(data)
 
 
 # ─── Schneller Wünsche-Parser (Regex, kein LLM) ───────────────
