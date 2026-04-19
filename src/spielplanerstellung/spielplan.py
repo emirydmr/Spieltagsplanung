@@ -252,7 +252,7 @@ def generiere_alle_spielplaene(
 
     # CP-SAT Slot-Vergabe: globale Optimierung, konfliktfrei
     from src.spielplanerstellung.slot_solver import solve_game_slots
-    solve_game_slots(alle_plaene, wuensche=wuensche, time_limit_seconds=120)
+    solve_game_slots(alle_plaene, wuensche=wuensche, time_limit_seconds=600)
 
     # Zähle verbleibende Konflikte (sollte 0 oder nahe 0 sein)
     _update_platz_konflikte(alle_plaene)
@@ -366,6 +366,15 @@ def _update_wunsch_verletzungen(
 
         for mannschaft, games in team_games.items():
             team_w = wuensche.get(mannschaft, [])
+
+            # Sammle ALLE gewünschten Wochentage dieses Teams
+            gewuenschte_wochentage: set[int] = set()
+            for w in team_w:
+                if w.kategorie == WunschKategorie.WOCHENTAG and w.wochentag:
+                    wd_nr = _WT_MAP.get(w.wochentag.strip().lower())
+                    if wd_nr is not None:
+                        gewuenschte_wochentage.add(wd_nr)
+
             for w in team_w:
                 pen = 2 if w.prioritaet == WunschPrio.HART else 1
 
@@ -387,32 +396,8 @@ def _update_wunsch_verletzungen(
                             break
 
                 elif w.kategorie == WunschKategorie.WOCHENTAG and w.wochentag:
-                    gewuenscht = _WT_MAP.get(w.wochentag.strip().lower())
-                    if gewuenscht is None:
-                        continue
-
-                    for g_datum, rolle, heim, gast, zeit, st_datum in games:
-                        if g_datum.weekday() == gewuenscht:
-                            continue  # Wunsch erfüllt
-
-                        # Prüfe ob der gewünschte Wochentag in ±2 Tagen erreichbar war
-                        # (Solver kann Fr/Sa/So verschieben = max ±2 Tage)
-                        ref = st_datum or g_datum
-                        diff = gewuenscht - ref.weekday()
-                        if diff > 3:
-                            diff -= 7
-                        elif diff < -3:
-                            diff += 7
-
-                        if abs(diff) <= 2:
-                            violations += pen
-                            details.append({
-                                "team": mannschaft,
-                                "typ": "Wochentag",
-                                "datum": g_datum.isoformat(),
-                                "spiel": f"{heim} vs {gast}",
-                                "grund": f"Spiel am {_WT_NAMES[g_datum.weekday()]} {g_datum.strftime('%d.%m.')} statt {w.wochentag}",
-                            })
+                    # Skip: Wochentag violations werden unten gesammelt gezählt
+                    pass
 
                 elif w.kategorie == WunschKategorie.ANSTOSSZEIT and w.uhrzeit:
                     parts = w.uhrzeit.replace(":", ".").split(".")
@@ -421,6 +406,10 @@ def _update_wunsch_verletzungen(
                     else:
                         continue
                     for g_datum, rolle, heim, gast, anstosszeit, st_datum in games:
+                        # Auf Wochentagen ist frühester Anstoß 17:30 – Wünsche vor 17:30
+                        # sind dort physisch unmöglich und werden nicht als Verletzung gezählt
+                        if g_datum.weekday() < 5 and wunsch_min < 17 * 60 + 30:
+                            continue
                         zeit_parts = (anstosszeit or "").replace(":", ".").split(".")
                         if len(zeit_parts) == 2 and zeit_parts[0].isdigit() and zeit_parts[1].isdigit():
                             actual_min = int(zeit_parts[0]) * 60 + int(zeit_parts[1])
@@ -468,6 +457,38 @@ def _update_wunsch_verletzungen(
                                 "spiel": f"{heim} vs {gast}",
                                 "grund": f"Heim statt Auswärts am {wunsch_date.strftime('%d.%m.%Y')}",
                             })
+
+            # ── Wochentag-Verletzungen: einmal pro Spiel, unabhängig von Anzahl Wochentag-Wünsche ──
+            if gewuenschte_wochentage:
+                wunsch_str = " oder ".join(
+                    _WT_NAMES[wd] for wd in sorted(gewuenschte_wochentage)
+                )
+                for g_datum, rolle, heim, gast, zeit, st_datum in games:
+                    if g_datum.weekday() in gewuenschte_wochentage:
+                        continue  # Spiel ist auf einem der gewünschten Tage
+
+                    # Prüfe ob mindestens einer der gewünschten Tage erreichbar war (±2 Tage)
+                    ref = st_datum or g_datum
+                    erreichbar = False
+                    for target_wd in gewuenschte_wochentage:
+                        diff = target_wd - ref.weekday()
+                        if diff > 3:
+                            diff -= 7
+                        elif diff < -3:
+                            diff += 7
+                        if abs(diff) <= 2:
+                            erreichbar = True
+                            break
+
+                    if erreichbar:
+                        violations += 1
+                        details.append({
+                            "team": mannschaft,
+                            "typ": "Wochentag",
+                            "datum": g_datum.isoformat(),
+                            "spiel": f"{heim} vs {gast}",
+                            "grund": f"Spiel am {_WT_NAMES[g_datum.weekday()]} {g_datum.strftime('%d.%m.')} statt {wunsch_str}",
+                        })
 
         plan.score.wunsch_verletzungen = violations
         plan.score.wunsch_details = details

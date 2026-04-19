@@ -854,14 +854,32 @@ def _parse_wuensche_fast(
                     if 1 <= day_val <= 31 and 1 <= month_val <= 12:
                         datum_spans.append((m.start(), m.end()))
 
+                def _in_datum_span_approx(pos: int, spans: list[tuple[int, int]]) -> bool:
+                    """Prüft ob position nahe (±5 Zeichen) eines Datums-Spans liegt."""
+                    return any(s - 5 <= pos <= e + 5 for s, e in spans)
+
                 # ── Wochentag-Präferenz ──
                 text_lower = text_clean.lower()
                 seen_wochentage = set()
-                for wt_key, wt_name in _WOCHENTAGE.items():
-                    if wt_key in text_lower:
-                        seen_wochentage.add(wt_name)
 
-                # Wenn mehrere Wochentage genannt: als EINE Präferenz mit allen Tagen speichern
+                # Wochentage nur zählen, wenn sie NICHT direkt vor einem Datum stehen
+                # (z.B. "Samstag, 01.11." ist ein Sperrtag, kein Wunschwochentag)
+                for wt_key, wt_name in _WOCHENTAGE.items():
+                    idx = text_lower.find(wt_key)
+                    while idx >= 0:
+                        # Prüfe ob nach dem Wochentag ein Datum folgt (innerhalb ~15 Zeichen)
+                        after = text_lower[idx + len(wt_key):idx + len(wt_key) + 15]
+                        in_datum = _in_datum_span_approx(idx, datum_spans)
+                        has_date_after = _re.search(r'^\s*,?\s*\d{1,2}[./]\d{1,2}', after) is not None
+                        if not in_datum and not has_date_after:
+                            seen_wochentage.add(wt_name)
+                            break
+                        idx = text_lower.find(wt_key, idx + 1)
+
+                # Wenn mehrere Wochentage: nur einen Wunsch mit dem übergeordneten Konzept
+                # Aber im Solver werden alle als Alternativen behandelt
+                # → Speichere EINEN Wunsch pro Wochentag, aber in _update_wunsch_verletzungen
+                #   zählen wir nur als Verletzung wenn der Tag auf KEINEM der gewünschten Tage liegt
                 for wt_name in seen_wochentage:
                     wuensche.append(Wunsch(
                         kategorie=WunschKategorie.WOCHENTAG,
