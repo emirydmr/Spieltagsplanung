@@ -1,12 +1,11 @@
-"""Parser für die Rückrunde-Einteilungs-Excel.
+"""Parser für Einteilungs-Excel (Hinrunde und Rückrunde).
 
 Liest die vom Spielleiter vorgegebenen Staffelzuordnungen
-aus dem Excel „Einteilungen Rückrunde 25-26 Junioren und Juniorinnen.xlsx".
+aus den Einteilungs-Excel-Dateien.
 
-Format pro Sheet (= Altersklasse):
-    - Staffel-Header in Spalten 0, 5, 10 (5er-Blöcke)
-    - Darunter: Rang, Mannschaftsname, Punkte, Quotient
-    - Mehrere Staffel-Blöcke vertikal und horizontal
+Unterstützte Formate:
+    - Rückrunde: Leistungsstaffel, Kreisstaffel, Bezirksstaffel
+    - Hinrunde: Qualistaffel, Regionenstaffel, Quali Bezirksstaffel
 
 Die Mannschaften werden gegen die Meldeliste abgeglichen,
 um Spielstätten-/Wünsche-Daten anzureichern.
@@ -20,11 +19,13 @@ import openpyxl
 from src.common.models import Mannschaft
 
 
-# Pattern für Staffel-Header-Erkennung
+# Pattern für Staffel-Header-Erkennung (Hinrunde + Rückrunde)
 _STAFFEL_HEADER_RE = re.compile(
     r"^([A-E]-Junior(?:en|innen))\s+"
-    r"(Leistungsstaffel|Kreisstaffel|Bezirksstaffel)\s*"
-    r"(\d+)?\s*(\(Doppelrunde\))?",
+    r"(Leistungsstaffel|Kreisstaffel|Bezirksstaffel"
+    r"|Qualistaffel|Quali\s*Bezirksstaffel"
+    r"|Regionenstaffel(?:\s+\w+)?)\s*"
+    r"(\d+)?\s*(?:\(.*\))?",
     re.IGNORECASE,
 )
 
@@ -69,6 +70,18 @@ def _normalize_name(name: str) -> str:
     return name.lower()
 
 
+def _name_words(name: str) -> set[str]:
+    """Extrahiert signifikante Wörter für Fuzzy-Matching.
+
+    Splittet auf Leerzeichen, /, - und entfernt Abkürzungspunkte.
+    """
+    # Punkte am Wortende entfernen (Abkürzungen wie "Markelsh.")
+    clean = re.sub(r"\.(?=\s|/|-|$)", "", name)
+    # Split auf Leerzeichen, / und -
+    parts = re.split(r"[\s/\-]+", clean)
+    return set(w for w in parts if len(w) > 2)
+
+
 def _safe_float(val) -> float | None:
     """Konvertiert einen Wert zu float, oder None."""
     if val is None:
@@ -93,7 +106,8 @@ def parse_rueckrunde_einteilung(excel_path: str) -> list[RueckrundeStaffel]:
 
     for sheet_name in wb.sheetnames:
         # Nur Altersklassen-Sheets verarbeiten
-        if not re.match(r"[A-E]-Junior", sheet_name):
+        # Beide Formate: "A-Junioren" (25-26) und "Einteilung A-Junioren" (24-25)
+        if not re.search(r"[A-E]-Junior|Juniorinnen", sheet_name, re.IGNORECASE):
             continue
 
         ws = wb[sheet_name]
@@ -103,9 +117,8 @@ def parse_rueckrunde_einteilung(excel_path: str) -> list[RueckrundeStaffel]:
         headers: list[tuple[int, int, RueckrundeStaffel]] = []  # (row, col, staffel)
 
         for ri, row in enumerate(rows):
-            for col_offset in (0, 5, 10):
-                if col_offset >= len(row):
-                    continue
+            # Alle Spalten scannen (24-25 B-Junioren hat Staffel 2 bei col 6 statt 5)
+            for col_offset in range(min(len(row), 20)):
                 cell = row[col_offset]
                 if not cell or not isinstance(cell, str):
                     continue
@@ -115,14 +128,14 @@ def parse_rueckrunde_einteilung(excel_path: str) -> list[RueckrundeStaffel]:
                     typ = m.group(2)
                     nr_str = m.group(3)
                     nr = int(nr_str) if nr_str else 1
-                    dr = bool(m.group(4))
+                    dr = "(Doppelrunde)" in cell or "(DR)" in cell
 
                     staffel = RueckrundeStaffel(
-                        name=cell.strip().replace(" (Doppelrunde)", ""),
+                        name=cell.strip(),
                         altersklasse=ak,
                         staffeltyp=typ,
                         nummer=nr,
-                        doppelrunde=dr or "(Doppelrunde)" in cell,
+                        doppelrunde=dr,
                     )
                     headers.append((ri, col_offset, staffel))
 
@@ -200,57 +213,99 @@ def match_teams_gegen_meldeliste(
     """Verknüpft Rückrunde-Teams mit Mannschaften aus der Meldeliste.
 
     Setzt team.mannschaft auf das passende Mannschaft-Objekt.
+    Matching berücksichtigt die Altersklasse der Staffel.
 
     Returns:
         (matched, unmatched) Anzahl
     """
-    # Index: normalisierter Name → Mannschaft
-    name_index: dict[str, Mannschaft] = {}
+    # Index: (normalisierter Name, altersklasse) → Mannschaft
+    ak_name_index: dict[tuple[str, str], Mannschaft] = {}
+    # Fallback-Index ohne AK (für Juniorinnen etc.)
+    name_index: dict[str, list[Mannschaft]] = {}
     for m in mannschaften:
         key = _normalize_name(m.mannschaftsname)
-        name_index[key] = m
-
-    matched = 0
-    unmatched = 0
+        ak_key = _normalize_ak(m.altersklasse)
+        ak_name_index[(key, ak_key)] = m
+        if key not in name_index:
+            name_index[key] = []
+        name_index[key].append(m)
 
     for staffel in staffeln:
+        staffel_ak = _normalize_ak(staffel.altersklasse)
+
         for team in staffel.teams:
             norm = _normalize_name(team.name)
 
-            # 1. Exakter Match
-            if norm in name_index:
-                team.mannschaft = name_index[norm]
-                matched += 1
+            # 1. Exakter Match mit AK
+            ak_match = ak_name_index.get((norm, staffel_ak))
+            if ak_match:
+                team.mannschaft = ak_match
                 continue
 
-            # 2. Substring-Match: Rückrunde-Name enthält Meldeliste-Name oder umgekehrt
+            # 2. Exakter Name ohne AK (Fallback)
+            if norm in name_index:
+                team.mannschaft = name_index[norm][0]
+                continue
+
+            # 3. Substring-Match mit AK-Präferenz
             found = False
-            for key, m in name_index.items():
-                if norm in key or key in norm:
+            for (key, ak), m in ak_name_index.items():
+                if ak == staffel_ak and (norm in key or key in norm):
                     team.mannschaft = m
-                    matched += 1
                     found = True
                     break
 
             if not found:
-                # 3. Wort-basierter Match: mind. 2 signifikante Wörter übereinstimmend
-                norm_words = set(w for w in norm.split() if len(w) > 2)
+                # 4. Substring-Match ohne AK
+                for key, ml in name_index.items():
+                    if norm in key or key in norm:
+                        team.mannschaft = ml[0]
+                        found = True
+                        break
+
+            if not found:
+                # 5. Wort-basierter Match mit AK-Präferenz
+                norm_words = _name_words(norm)
                 best_score = 0
                 best_match = None
-                for key, m in name_index.items():
-                    key_words = set(w for w in key.split() if len(w) > 2)
+                for (key, ak), m in ak_name_index.items():
+                    key_words = _name_words(key)
+                    # Exakte Wort-Überlappung
                     common = norm_words & key_words
-                    if len(common) > best_score and len(common) >= 2:
-                        best_score = len(common)
+                    # Abkürzungs-Match: "Markelsh" startswith "Markelsheim"[:8]
+                    for nw in norm_words - common:
+                        for kw in key_words - common:
+                            if len(nw) >= 4 and len(kw) >= 4:
+                                if nw.startswith(kw[:4]) or kw.startswith(nw[:4]):
+                                    common.add(nw)
+                                    break
+                    score = len(common)
+                    # Bonus für passende AK
+                    if ak == staffel_ak:
+                        score += 0.5
+                    if score > best_score and len(common) >= 2:
+                        best_score = score
                         best_match = m
 
                 if best_match:
                     team.mannschaft = best_match
-                    matched += 1
-                else:
-                    unmatched += 1
 
-    return matched, unmatched
+    # Unique matched Meldeliste-Teams zählen
+    matched_set: set[int] = set()
+    unmatched = 0
+    for staffel in staffeln:
+        for team in staffel.teams:
+            if team.mannschaft:
+                matched_set.add(id(team.mannschaft))
+            else:
+                unmatched += 1
+
+    return len(matched_set), unmatched
+
+
+def _normalize_ak(ak: str) -> str:
+    """Normalisiert Altersklasse für Matching."""
+    return ak.strip().lower()
 
 
 def staffeln_to_einteilung_result(
@@ -307,10 +362,13 @@ def staffeln_to_einteilung_result(
 
 def _staffeltyp_to_topf(typ: str) -> str:
     """Mappt Staffeltyp auf Topf-String für die API."""
-    if "Leistung" in typ:
+    t = typ.lower()
+    if "leistung" in t or "regionenstaffel" in t:
         return "Leistungsstaffel"
-    elif "Bezirk" in typ:
+    elif "bezirk" in t:
         return "Bezirksstaffel"
+    elif "quali" in t:
+        return "Qualistaffel"
     else:
         return "Kreisstaffel"
 

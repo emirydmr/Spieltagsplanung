@@ -54,6 +54,11 @@ async def app_page():
     return FileResponse(str(UI_DIR / "app.html"))
 
 
+@app.get("/builder")
+async def builder_page():
+    return FileResponse(str(UI_DIR / "builder.html"))
+
+
 # ─── API ───────────────────────────────────────────────────────
 
 @app.post("/api/einteilung")
@@ -221,10 +226,28 @@ async def api_einteilung_rueckrunde(
         matched, unmatched = match_teams_gegen_meldeliste(staffeln, mannschaften)
         print(f"[Rückrunde] {matched} Teams gematcht, {unmatched} ohne Match")
 
-        # 4. In API-Format konvertieren
+        # 4. Meldeliste-Teams ohne Match finden (Nachmeldungen / neue Teams)
+        matched_ids = set()
+        for s in staffeln:
+            for t in s.teams:
+                if t.mannschaft:
+                    matched_ids.add(id(t.mannschaft))
+        neue_teams = []
+        for m in mannschaften:
+            if id(m) not in matched_ids:
+                t = {"mannschaft": m.mannschaftsname, "verein": m.vereinsname,
+                     "verein_nr": m.verein_nr, "altersklasse": m.altersklasse,
+                     "region": m.bezirk_alt or "?"}
+                if m.spielstaette:
+                    t["lat"] = m.spielstaette.lat
+                    t["lon"] = m.spielstaette.lon
+                neue_teams.append(t)
+
+        # 5. In API-Format konvertieren
         result = staffeln_to_einteilung_result(staffeln, len(mannschaften), n_coords)
         result["matched"] = matched
         result["unmatched"] = unmatched
+        result["neue_teams"] = neue_teams
 
         return JSONResponse(result)
 
@@ -233,6 +256,61 @@ async def api_einteilung_rueckrunde(
     finally:
         Path(tmp_ml.name).unlink(missing_ok=True)
         Path(tmp_et.name).unlink(missing_ok=True)
+
+
+# ─── Builder: Team-Pool ───────────────────────────────────────
+
+@app.post("/api/builder/teams")
+async def api_builder_teams(meldeliste: UploadFile = File(...)):
+    """Parst die Meldeliste und gibt einen flachen Team-Pool zurück.
+
+    Jedes Team bekommt eine eindeutige _id und alle Infos die der
+    Staffel-Builder braucht (Name, Region, Koordinaten, Hinrunde-Daten).
+    """
+    if not meldeliste.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(400, "Nur Excel-Dateien (.xlsx) erlaubt")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        shutil.copyfileobj(meldeliste.file, tmp)
+        tmp_path = tmp.name
+
+    try:
+        mannschaften = parse_meldeliste(tmp_path)
+        n_coords = verknuepfe_koordinaten(mannschaften)
+
+        teams = []
+        for i, m in enumerate(mannschaften):
+            team = {
+                "_id": f"t_{i}",
+                "mannschaft": m.mannschaftsname,
+                "verein": m.vereinsname,
+                "verein_nr": m.verein_nr,
+                "altersklasse": m.altersklasse,
+                "region": m.bezirk_alt or "?",
+                "topf": m.topf,
+                "wuensche_text": m.wuensche_text or "",
+            }
+            if m.spielstaette:
+                team["spielstaette"] = m.spielstaette.name or ""
+                team["adresse"] = m.spielstaette.adresse or ""
+                team["lat"] = m.spielstaette.lat
+                team["lon"] = m.spielstaette.lon
+            # Hinrunde-Daten (leer bei Erstimport)
+            team["rang_hinrunde"] = None
+            team["punkte_hinrunde"] = None
+            team["quotient_hinrunde"] = None
+            teams.append(team)
+
+        return JSONResponse({
+            "teams": teams,
+            "total": len(teams),
+            "teams_mit_coords": n_coords,
+        })
+
+    except Exception as e:
+        raise HTTPException(500, f"Fehler beim Parsen: {str(e)}")
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
 
 
 # ─── Excel Export ──────────────────────────────────────────────
@@ -336,6 +414,225 @@ async def api_export(request: Request):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename="Staffeleinteilung.xlsx",
     )
+
+
+# ─── Rückrunde Excel Export (Jochen-Format) ────────────────────
+
+@app.post("/api/export/rueckrunde")
+async def api_export_rueckrunde(request: Request):
+    """Exportiert die Einteilung im Jochen-Format (gleiche Struktur wie Eingangs-Excel).
+
+    Layout pro Sheet (= Altersklasse):
+    - Links (A-O): Staffel-Blöcke nebeneinander (max 3 pro Zeile)
+      je Block: Rang | Mannschaft | Punkte | Q | (leer)
+    - Rechts (P-Y): Gesamtübersicht nach Region (Unterland / Hohenlohe)
+      mit LS/KS/BS-Markierung
+    """
+    data = await request.json()
+    gruppen = data.get("gruppen", [])
+    saison = data.get("saison", "2025/26")
+    if not gruppen:
+        raise HTTPException(400, "Keine Gruppen vorhanden")
+
+    wb = _build_rueckrunde_workbook(gruppen, saison)
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    wb.save(tmp.name)
+    tmp.close()
+
+    return FileResponse(
+        tmp.name,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=f"Einteilung_Rueckrunde_{saison.replace('/', '_')}.xlsx",
+    )
+
+
+def _build_rueckrunde_workbook(gruppen: list[dict], saison: str) -> Workbook:
+    """Baut eine Excel-Datei im Jochen-Format."""
+    from datetime import date as _date
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+
+    # ── Styles (Jochen-Format: Arial Narrow) ──
+    title_font = Font(name="Arial Narrow", bold=True, size=22, underline="single")
+    header_font = Font(name="Arial Narrow", bold=True, size=16)
+    subheader_font = Font(name="Arial Narrow", bold=True, size=12)
+    team_font = Font(name="Arial Narrow", size=14)
+    team_font_small = Font(name="Arial Narrow", size=11)
+    marker_font = Font(name="Arial Narrow", bold=True, size=11)
+    stand_font = Font(name="Arial Narrow", size=11, color="888888")
+
+    center = Alignment(horizontal="center", vertical="center")
+
+    # Farben für Staffeltypen
+    ls_fill = PatternFill(start_color="DAEEF3", end_color="DAEEF3", fill_type="solid")
+    ks_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+
+    # Gruppiere nach Altersklasse
+    ak_gruppen: dict[str, list[dict]] = {}
+    for g in gruppen:
+        ak = g["altersklasse"]
+        ak_gruppen.setdefault(ak, []).append(g)
+
+    first_sheet = True
+    for ak in sorted(ak_gruppen.keys()):
+        if first_sheet:
+            ws = wb.active
+            ws.title = ak[:31]
+            first_sheet = False
+        else:
+            ws = wb.create_sheet(title=ak[:31])
+
+        # Spaltenbreiten (Jochen-Format)
+        widths = [4.6, 50, 7.9, 5, 6.4] * 3
+        widths += [8.6, 4.4, 43, 7, 7, 11.4, 4.4, 43, 7, 7, 11.4]
+        for i, w in enumerate(widths):
+            ws.column_dimensions[get_column_letter(i + 1)].width = w
+
+        # ── Titel-Zeile ──
+        ws.cell(row=1, column=1, value=f"Vorschlag Einteilung Rückrunde {ak} {saison}").font = title_font
+        ws.merge_cells("A1:G1")
+        today = _date.today()
+        ws.cell(row=1, column=12, value=f"Stand: {today.strftime('%d.%m.%y')}").font = stand_font
+
+        # Sammle alle Staffeln dieser AK, gruppiert nach Typ
+        ak_staffeln = []
+        for g in ak_gruppen[ak]:
+            for s in g.get("staffeln", []):
+                ak_staffeln.append({"staffel": s, "gruppe": g})
+
+        # Sortiere: Bezirksstaffel → Leistungsstaffel → Kreisstaffel
+        type_order = {"Bezirksstaffel": 0, "Leistungsstaffel": 1, "Kreisstaffel": 2}
+        ak_staffeln.sort(key=lambda x: (
+            type_order.get(x["gruppe"]["topf"], 3),
+            x["staffel"].get("staffel_name", ""),
+        ))
+
+        # ── Links: Staffel-Blöcke (max 3 nebeneinander) ──
+        row = 4
+        staffel_idx = 0
+        current_type = None
+
+        while staffel_idx < len(ak_staffeln):
+            entry = ak_staffeln[staffel_idx]
+            typ = entry["gruppe"]["topf"]
+
+            if typ != current_type:
+                if current_type is not None:
+                    row += 2
+                current_type = typ
+
+            # Bis zu 3 Staffeln nebeneinander
+            block_start_idx = staffel_idx
+            cols_used = 0
+            while staffel_idx < len(ak_staffeln) and cols_used < 3:
+                if ak_staffeln[staffel_idx]["gruppe"]["topf"] != current_type:
+                    break
+                staffel_idx += 1
+                cols_used += 1
+
+            block_staffeln = ak_staffeln[block_start_idx:staffel_idx]
+
+            # Header-Zeile
+            for bi, entry in enumerate(block_staffeln):
+                col_offset = bi * 5 + 1
+                s = entry["staffel"]
+                name = s.get("staffel_name", f"Staffel {bi + 1}")
+                dr = " (Doppelrunde)" if s.get("doppelrunde") else ""
+
+                ws.cell(row=row, column=col_offset, value=f"{name}{dr}").font = header_font
+                ws.merge_cells(
+                    start_row=row, start_column=col_offset,
+                    end_row=row, end_column=col_offset + 1,
+                )
+                ws.cell(row=row, column=col_offset + 2, value="Punkte").font = subheader_font
+                ws.cell(row=row, column=col_offset + 2).alignment = center
+                ws.cell(row=row, column=col_offset + 3, value="Q").font = subheader_font
+                ws.cell(row=row, column=col_offset + 3).alignment = center
+
+            row += 1
+
+            # Teams
+            max_teams = max(len(e["staffel"].get("teams", [])) for e in block_staffeln)
+            for ti in range(max_teams):
+                for bi, entry in enumerate(block_staffeln):
+                    col_offset = bi * 5 + 1
+                    teams = entry["staffel"].get("teams", [])
+                    if ti >= len(teams):
+                        continue
+                    t = teams[ti]
+                    rang = t.get("rang_hinrunde", ti + 1)
+                    ws.cell(row=row, column=col_offset, value=f"{rang}.").font = team_font
+                    ws.cell(row=row, column=col_offset).alignment = center
+                    ws.cell(row=row, column=col_offset + 1, value=t.get("mannschaft", "")).font = team_font
+                    punkte = t.get("punkte_hinrunde")
+                    if punkte is not None:
+                        ws.cell(row=row, column=col_offset + 2, value=punkte).font = team_font
+                        ws.cell(row=row, column=col_offset + 2).alignment = center
+                    quotient = t.get("quotient_hinrunde")
+                    if quotient is not None:
+                        q_val = round(quotient, 4) if isinstance(quotient, float) else quotient
+                        ws.cell(row=row, column=col_offset + 3, value=q_val).font = team_font
+                        ws.cell(row=row, column=col_offset + 3).alignment = center
+                row += 1
+
+        # ── Rechts: Regionale Zusammenfassung (P-Y) ──
+        _write_regional_summary(ws, ak_staffeln, team_font_small, subheader_font, marker_font, center)
+
+    return wb
+
+
+def _write_regional_summary(ws, ak_staffeln, team_font, subheader_font, marker_font, center):
+    """Schreibt die regionale Zusammenfassung rechts (Spalten P-Y)."""
+    regions: dict[str, list[dict]] = {}
+
+    for entry in ak_staffeln:
+        typ = entry["gruppe"]["topf"]
+        marker = "LS" if "Leistung" in typ else "BS" if "Bezirk" in typ else "KS"
+
+        for t in entry["staffel"].get("teams", []):
+            region = t.get("region", "?")
+            team_data = {
+                "mannschaft": t.get("mannschaft", ""),
+                "punkte": t.get("punkte_hinrunde"),
+                "quotient": t.get("quotient_hinrunde"),
+                "marker": marker,
+            }
+            if "Unterland" in region:
+                regions.setdefault("Unterland", []).append(team_data)
+            elif "Hohenlohe" in region:
+                regions.setdefault("Hohenlohe", []).append(team_data)
+            else:
+                regions.setdefault("Sonstige", []).append(team_data)
+
+    for key in regions:
+        regions[key].sort(key=lambda x: (-(x["quotient"] or 0), -(x["punkte"] or 0)))
+
+    # Unterland ab Spalte Q (17), Hohenlohe ab V (22)
+    col_ul, col_hl = 17, 22
+
+    for label, col in [("Unterland", col_ul), ("Hohenlohe", col_hl)]:
+        ws.cell(row=4, column=col, value=label).font = subheader_font
+        ws.cell(row=4, column=col + 1, value="Punkte").font = subheader_font
+        ws.cell(row=4, column=col + 1).alignment = center
+        ws.cell(row=4, column=col + 2, value="Q").font = subheader_font
+        ws.cell(row=4, column=col + 2).alignment = center
+
+        for i, t in enumerate(regions.get(label, [])):
+            r = 5 + i
+            ws.cell(row=r, column=col - 1, value=f"{i + 1}.").font = team_font
+            ws.cell(row=r, column=col - 1).alignment = center
+            ws.cell(row=r, column=col, value=t["mannschaft"]).font = team_font
+            if t["punkte"] is not None:
+                ws.cell(row=r, column=col + 1, value=t["punkte"]).font = team_font
+                ws.cell(row=r, column=col + 1).alignment = center
+            if t["quotient"] is not None:
+                q_val = round(t["quotient"], 4) if isinstance(t["quotient"], float) else t["quotient"]
+                ws.cell(row=r, column=col + 2, value=q_val).font = team_font
+                ws.cell(row=r, column=col + 2).alignment = center
+            ws.cell(row=r, column=col + 3, value=t["marker"]).font = marker_font
+            ws.cell(row=r, column=col + 3).alignment = center
 
 
 # ─── Vereinswünsche LLM Parsing ───────────────────────────────

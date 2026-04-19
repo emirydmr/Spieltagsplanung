@@ -223,4 +223,26 @@ def verknuepfe_koordinaten(
                 m.spielstaette.lon = entry["lon"]
                 verknuepft += 1
 
+    # Fallback: Teams ohne Spielstätte bekommen die Spielstätte eines
+    # anderen Teams desselben Vereins (gleiche Verein-Nr).
+    verein_spielstaetten: dict[str, Spielstaette] = {}
+    for m in mannschaften:
+        if m.spielstaette and m.spielstaette.lat is not None:
+            if m.verein_nr not in verein_spielstaetten:
+                verein_spielstaetten[m.verein_nr] = m.spielstaette
+
+    fallback_count = 0
+    for m in mannschaften:
+        if not m.spielstaette or m.spielstaette.lat is None:
+            ss = verein_spielstaetten.get(m.verein_nr)
+            if ss:
+                m.spielstaette = Spielstaette(
+                    name=ss.name, adresse=ss.adresse, lat=ss.lat, lon=ss.lon,
+                )
+                fallback_count += 1
+                verknuepft += 1
+
+    if fallback_count:
+        print(f"[Geocode] {fallback_count} Teams per Vereins-Fallback verknüpft")
+
     return verknuepft

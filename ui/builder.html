@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Staffel-Builder – WFV</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/style.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+
+<!-- ─── Navbar ─────────────────────────────────────────────── -->
+<nav class="navbar">
+    <a href="/" class="navbar-brand">
+        <img src="/assets/wfv-logo.jpg" alt="WFV">
+        <span>Spieltagsplaner</span>
+    </a>
+    <ul class="navbar-nav">
+        <li><a href="/">Start</a></li>
+        <li><a href="/app">Planer</a></li>
+        <li><a href="/builder" class="active">Staffel-Builder</a></li>
+    </ul>
+</nav>
+
+<!-- ─── App ────────────────────────────────────────────────── -->
+<div class="app-wrapper">
+    <div class="app-content" style="max-width: 1800px;">
+
+        <!-- Step 1: Upload -->
+        <section id="builder-upload">
+            <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem;">Staffel-Builder</h2>
+            <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+                Lade die Meldeliste hoch und baue die Staffeleinteilung manuell per Drag &amp; Drop.
+            </p>
+
+            <div class="card" style="margin-bottom: 1.5rem;">
+                <div class="card-body">
+                    <div class="upload-zone" id="uploadZone">
+                        <div class="upload-zone-icon">
+                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        </div>
+                        <h3>Meldeliste hochladen</h3>
+                        <p>Excel-Datei (.xlsx) hierher ziehen oder <strong>klicken</strong></p>
+                        <p id="fileName" class="file-selected" style="display:none;"></p>
+                        <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
+                    </div>
+                </div>
+            </div>
+
+            <button class="btn btn-primary btn-lg" id="btnLoad" disabled style="width: 100%;">
+                Teams laden
+            </button>
+        </section>
+
+        <!-- Step 2: Builder -->
+        <section id="builder-main" style="display: none;">
+            <!-- Header bar -->
+            <div style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                <div style="display: flex; gap: 0.75rem; align-items: center;">
+                    <button class="btn btn-secondary btn-sm" id="btnBackUpload">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                        Neue Meldeliste
+                    </button>
+                    <h2 style="font-size: 1.3rem; margin: 0;">Staffel-Builder</h2>
+                </div>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <span id="poolCounter" style="font-size: 0.85rem; color: var(--text-muted); font-weight: 600;"></span>
+                    <button class="btn btn-primary btn-sm" id="btnExport" disabled>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Excel Export
+                    </button>
+                </div>
+            </div>
+
+            <!-- AK Filter -->
+            <div style="margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                <span style="font-weight: 600; font-size: 0.85rem;">Altersklasse:</span>
+                <select id="filterAk" class="filter-select"></select>
+            </div>
+
+            <!-- 3-column layout: Pool | Staffeln | Map -->
+            <div class="builder-grid">
+                <!-- Left: Team Pool -->
+                <div class="builder-pool">
+                    <div class="card" style="height: 100%;">
+                        <div class="card-header" style="padding: 0.75rem 1rem;">
+                            <h3 style="font-size: 0.9rem;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                Verfügbare Teams
+                            </h3>
+                            <input type="text" id="poolSearch" class="filter-select" placeholder="Suchen..." style="width: 140px; font-size: 0.8rem;">
+                        </div>
+                        <div class="card-body" style="padding: 0; overflow-y: auto; max-height: calc(100vh - 260px);">
+                            <div id="poolList" class="builder-team-list"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Center: Staffeln -->
+                <div class="builder-staffeln">
+                    <div style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem;">
+                        <button class="btn btn-primary btn-sm" id="btnAddStaffel">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Neue Staffel
+                        </button>
+                    </div>
+                    <div id="staffelnContainer" style="display: flex; flex-direction: column; gap: 0.75rem;"></div>
+                </div>
+
+                <!-- Right: Map -->
+                <div class="builder-map">
+                    <div class="card" style="position: sticky; top: 80px;">
+                        <div class="card-header" style="padding: 0.75rem 1rem;">
+                            <h3 style="font-size: 0.9rem;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+                                Karte
+                            </h3>
+                            <span id="mapStaffelLabel" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+                        </div>
+                        <div class="card-body" style="padding: 0;">
+                            <div id="map" style="height: 500px; border-radius: 0 0 var(--radius) var(--radius);"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+</div>
+
+<!-- Staffel Template (hidden) -->
+<template id="staffelTemplate">
+    <div class="builder-staffel card" data-staffel-id="">
+        <div class="builder-staffel-header">
+            <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 0;">
+                <span class="staffel-color-dot"></span>
+                <input type="text" class="staffel-name-input" placeholder="Staffelname...">
+                <select class="staffel-typ-select filter-select" style="font-size: 0.8rem; width: auto;">
+                    <option value="Leistungsstaffel">Leistungsstaffel</option>
+                    <option value="Kreisstaffel" selected>Kreisstaffel</option>
+                    <option value="Bezirksstaffel">Bezirksstaffel</option>
+                </select>
+                <label style="display: flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--text-muted); cursor: pointer; white-space: nowrap;">
+                    <input type="checkbox" class="staffel-dr-check"> Doppelrunde
+                </label>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span class="staffel-team-count" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;"></span>
+                <button class="btn btn-sm btn-secondary staffel-delete-btn" style="padding: 0.25rem 0.5rem; color: var(--danger);" title="Staffel löschen">✕</button>
+            </div>
+        </div>
+        <div class="builder-staffel-body builder-drop-zone" data-zone="staffel">
+            <div class="drop-placeholder">Teams hierher ziehen</div>
+        </div>
+    </div>
+</template>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<script src="/assets/builder.js"></script>
+</body>
+</html>
