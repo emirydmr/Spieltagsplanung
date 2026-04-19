@@ -210,6 +210,9 @@ __marimo__/
 ~$*.xlsx
 ~$*.xls
 
+# Scratch / temp scripts
+_scratch/
+
 # Output (regenerierbar)
 output/*
 !output/.gitkeep
