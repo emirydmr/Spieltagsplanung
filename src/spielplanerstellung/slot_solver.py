@@ -213,7 +213,7 @@ def solve_game_slots(
     for i, (wk, games) in enumerate(sorted(by_week.items())):
         # Proportionale Zeitverteilung: größere Cluster bekommen mehr
         cluster_limit = max(10, int(time_limit_seconds * len(games) / max(total_games, 1)))
-        cluster_limit = min(cluster_limit, 180)  # Cap bei 180s pro Cluster
+        cluster_limit = min(cluster_limit, 90)  # Cap bei 90s pro Cluster
 
         print(f"[CP-SAT] Cluster {i+1}/{n_groups}: building model ({len(games)} games)...", flush=True)
         model = cp_model.CpModel()
@@ -229,13 +229,15 @@ def solve_game_slots(
     repair_changes = _repair_cross_date_conflicts(plaene, wuensche, time_limit_seconds=60)
     total_changes += repair_changes
 
-    # ── Dritter Pass: Globale Wunsch-Optimierung ──────────────
-    wish_changes = _global_wish_optimization(plaene, wuensche, time_limit_seconds=240)
-    total_changes += wish_changes
-
-    # ── Vierter Pass: Greedy Per-Game Wunsch-Repair ───────────
-    greedy_changes = _greedy_wish_repair(plaene, wuensche)
-    total_changes += greedy_changes
+    # ── Wiederholte Wunsch-Optimierung + Greedy Repair ────────
+    for cycle in range(3):
+        wish_changes = _global_wish_optimization(plaene, wuensche, time_limit_seconds=240)
+        greedy_changes = _greedy_wish_repair(plaene, wuensche)
+        cycle_total = wish_changes + greedy_changes
+        total_changes += cycle_total
+        if cycle_total == 0:
+            break
+        print(f"[CP-SAT] Wish+Greedy Zyklus {cycle+1}: {cycle_total} Änd.", flush=True)
 
     print(f"[CP-SAT] Fertig in {_time.time() - t0:.1f}s, "
           f"{total_changes} Spiele geändert")
