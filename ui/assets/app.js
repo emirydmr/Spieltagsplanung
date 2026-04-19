@@ -23,12 +23,22 @@
     const mapGruppeFilter = $('#mapGruppeFilter');
     const btnExport = $('#btnExport');
 
+    // Rückrunde DOM refs
+    const btnHinrunde = $('#btnHinrunde');
+    const btnRueckrunde = $('#btnRueckrunde');
+    const rueckrundeUploadCard = $('#rueckrundeUploadCard');
+    const uploadZoneEinteilung = $('#uploadZoneEinteilung');
+    const fileInputEinteilung = $('#fileInputEinteilung');
+    const fileNameEinteilung = $('#fileNameEinteilung');
+
     // Map
     let map = null;
     let mapLayers = [];
 
     let selectedFile = null;
     let resultData = null;
+    let selectedFileEinteilung = null;
+    let modeRueckrunde = false;
 
     // Drag-and-drop state
     let dragTeam = null;   // { gruppeIdx, staffelIdx, teamIdx, data }
@@ -79,7 +89,72 @@
         selectedFile = file;
         fileNameEl.textContent = file.name;
         fileNameEl.style.display = 'block';
-        btnStart.disabled = false;
+        updateStartButtonState();
+    }
+
+    // ─── Hinrunde / Rückrunde Toggle ─────────────────────────
+    function setMode(rueckrunde) {
+        modeRueckrunde = rueckrunde;
+        if (rueckrunde) {
+            btnHinrunde.style.background = '';
+            btnHinrunde.style.color = '';
+            btnHinrunde.classList.add('btn-secondary');
+            btnRueckrunde.style.background = 'var(--primary)';
+            btnRueckrunde.style.color = 'white';
+            btnRueckrunde.classList.remove('btn-secondary');
+            rueckrundeUploadCard.style.display = '';
+            btnStart.textContent = 'Rückrunde laden';
+        } else {
+            btnRueckrunde.style.background = '';
+            btnRueckrunde.style.color = '';
+            btnRueckrunde.classList.add('btn-secondary');
+            btnHinrunde.style.background = 'var(--primary)';
+            btnHinrunde.style.color = 'white';
+            btnHinrunde.classList.remove('btn-secondary');
+            rueckrundeUploadCard.style.display = 'none';
+            btnStart.textContent = 'Einteilung berechnen';
+        }
+        updateStartButtonState();
+    }
+
+    btnHinrunde.addEventListener('click', () => setMode(false));
+    btnRueckrunde.addEventListener('click', () => setMode(true));
+
+    // ─── Einteilung Upload (Rückrunde) ───────────────────────
+    uploadZoneEinteilung.addEventListener('click', () => fileInputEinteilung.click());
+    uploadZoneEinteilung.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadZoneEinteilung.classList.add('dragover');
+    });
+    uploadZoneEinteilung.addEventListener('dragleave', () => {
+        uploadZoneEinteilung.classList.remove('dragover');
+    });
+    uploadZoneEinteilung.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadZoneEinteilung.classList.remove('dragover');
+        if (e.dataTransfer.files.length) handleFileEinteilung(e.dataTransfer.files[0]);
+    });
+    fileInputEinteilung.addEventListener('change', () => {
+        if (fileInputEinteilung.files.length) handleFileEinteilung(fileInputEinteilung.files[0]);
+    });
+
+    function handleFileEinteilung(file) {
+        if (!file.name.match(/\.xlsx?$/i)) {
+            showToast('Nur Excel-Dateien (.xlsx) erlaubt', 'error');
+            return;
+        }
+        selectedFileEinteilung = file;
+        fileNameEinteilung.textContent = file.name;
+        fileNameEinteilung.style.display = 'block';
+        updateStartButtonState();
+    }
+
+    function updateStartButtonState() {
+        if (modeRueckrunde) {
+            btnStart.disabled = !(selectedFile && selectedFileEinteilung);
+        } else {
+            btnStart.disabled = !selectedFile;
+        }
     }
 
     // ─── Start Button ────────────────────────────────────────
@@ -88,14 +163,27 @@
 
         loading.style.display = 'flex';
 
-        const formData = new FormData();
-        formData.append('file', selectedFile);
-
         try {
-            const resp = await fetch('/api/einteilung', {
-                method: 'POST',
-                body: formData,
-            });
+            let resp;
+            if (modeRueckrunde) {
+                // Rückrunde: 2 Dateien an separaten Endpoint
+                if (!selectedFileEinteilung) return;
+                const formData = new FormData();
+                formData.append('meldeliste', selectedFile);
+                formData.append('einteilung', selectedFileEinteilung);
+                resp = await fetch('/api/einteilung/rueckrunde', {
+                    method: 'POST',
+                    body: formData,
+                });
+            } else {
+                // Hinrunde: 1 Datei
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+                resp = await fetch('/api/einteilung', {
+                    method: 'POST',
+                    body: formData,
+                });
+            }
 
             if (!resp.ok) {
                 const err = await resp.json();
@@ -106,7 +194,10 @@
             renderResults(resultData);
             stepUpload.style.display = 'none';
             stepResults.style.display = 'block';
-            showToast('Einteilung berechnet!', 'success');
+            const msg = modeRueckrunde
+                ? `Rückrunde geladen! ${resultData.matched || 0} Teams gematcht, ${resultData.unmatched || 0} ohne Match.`
+                : 'Einteilung berechnet!';
+            showToast(msg, 'success');
         } catch (err) {
             showToast(err.message, 'error');
         } finally {
@@ -285,25 +376,37 @@
             .map(([r, n]) => `${r}: ${n}`)
             .join(' · ');
 
+        const isRueckrunde = resultData && resultData.rueckrunde;
+
         const rows = staffel.teams.map((t, ti) => {
             const dotClass = t.region === 'Hohenlohe' ? 'hohenlohe'
                 : t.region === 'Unterland' ? 'unterland'
                 : 'unknown';
             const ort = t.adresse ? t.adresse.split(', ').pop() : '';
+            const rangCol = isRueckrunde && t.rang_hinrunde != null
+                ? `<td style="text-align:center">${t.rang_hinrunde}.</td>` : '';
+            const punkteCol = isRueckrunde && t.punkte_hinrunde != null
+                ? `<td style="text-align:center">${t.punkte_hinrunde}</td>` : (isRueckrunde ? '<td></td>' : '');
+            const flexBadge = t.ist_flex ? ' <span class="gruppe-badge badge-gold" style="font-size:0.65rem">flex</span>' : '';
             return `
                 <tr>
-                    <td>${t.mannschaft}</td>
+                    ${rangCol}
+                    <td>${t.mannschaft}${flexBadge}</td>
                     <td><span class="region-dot ${dotClass}"></span>${t.region}</td>
                     <td>${ort}</td>
+                    ${punkteCol}
                 </tr>
             `;
         }).join('');
+
+        const rangHeader = isRueckrunde ? '<th style="width:40px">Pl.</th>' : '';
+        const punkteHeader = isRueckrunde ? '<th style="width:60px">Pkt.</th>' : '';
 
         return `
             <div class="staffel" data-gruppe="${gruppeIdx}" data-staffel="${staffelIdx}">
                 <div class="staffel-header">
                     <div class="staffel-name">
-                        Staffel ${staffelIdx + 1} ${dr}
+                        ${staffel.staffel_name || ('Staffel ' + (staffelIdx + 1))} ${dr}
                     </div>
                     <div class="staffel-info">
                         <span>${sizes}</span>
@@ -314,9 +417,11 @@
                 <table class="teams-table">
                     <thead>
                         <tr>
+                            ${rangHeader}
                             <th>Mannschaft</th>
                             <th>Region</th>
                             <th>Ort</th>
+                            ${punkteHeader}
                         </tr>
                     </thead>
                     <tbody>

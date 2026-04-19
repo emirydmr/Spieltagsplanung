@@ -21,6 +21,9 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.data_import.meldeliste_parser import parse_meldeliste, verknuepfe_koordinaten
+from src.data_import.rueckrunde_parser import (
+    parse_rueckrunde_einteilung, match_teams_gegen_meldeliste, staffeln_to_einteilung_result,
+)
 from src.staffeleinteilung.algorithmus import gruppiere_mannschaften, einteilung_erstellen
 from src.staffeleinteilung.scoring import ScoreGewichte
 from src.common.distanz import haversine_km
@@ -180,6 +183,56 @@ def _staffel_to_dict(mannschaften: list) -> dict:
         "max_distanz_km": round(max_dist, 1),
         "doppelrunde": doppelrunde,
     }
+
+
+# ─── Rückrunde Einteilung ─────────────────────────────────────
+
+@app.post("/api/einteilung/rueckrunde")
+async def api_einteilung_rueckrunde(
+    meldeliste: UploadFile = File(...),
+    einteilung: UploadFile = File(...),
+):
+    """Rückrunde: Liest vorgegebene Staffelzuordnungen aus der Einteilungs-Excel.
+
+    Erwartet zwei Dateien:
+      - meldeliste: DFBnet-Meldeliste (Spielstätten, Wünsche)
+      - einteilung: Einteilungs-Excel mit Staffelzuordnungen vom Spielleiter
+    """
+    for f in (meldeliste, einteilung):
+        if not f.filename.endswith((".xlsx", ".xls")):
+            raise HTTPException(400, f"Nur Excel-Dateien erlaubt: {f.filename}")
+
+    tmp_ml = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp_et = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    try:
+        shutil.copyfileobj(meldeliste.file, tmp_ml)
+        tmp_ml.close()
+        shutil.copyfileobj(einteilung.file, tmp_et)
+        tmp_et.close()
+
+        # 1. Meldeliste parsen (Spielstätten, Wünsche, Koordinaten)
+        mannschaften = parse_meldeliste(tmp_ml.name)
+        n_coords = verknuepfe_koordinaten(mannschaften)
+
+        # 2. Rückrunde-Einteilung parsen
+        staffeln = parse_rueckrunde_einteilung(tmp_et.name)
+
+        # 3. Teams gegen Meldeliste matchen
+        matched, unmatched = match_teams_gegen_meldeliste(staffeln, mannschaften)
+        print(f"[Rückrunde] {matched} Teams gematcht, {unmatched} ohne Match")
+
+        # 4. In API-Format konvertieren
+        result = staffeln_to_einteilung_result(staffeln, len(mannschaften), n_coords)
+        result["matched"] = matched
+        result["unmatched"] = unmatched
+
+        return JSONResponse(result)
+
+    except Exception as e:
+        raise HTTPException(500, f"Fehler bei Rückrunde-Verarbeitung: {str(e)}")
+    finally:
+        Path(tmp_ml.name).unlink(missing_ok=True)
+        Path(tmp_et.name).unlink(missing_ok=True)
 
 
 # ─── Excel Export ──────────────────────────────────────────────

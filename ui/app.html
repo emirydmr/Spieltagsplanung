@@ -50,6 +50,17 @@
                     Lade eine DFBnet-Meldeliste hoch, um die Einteilung zu berechnen.
                 </p>
 
+                <!-- Hinrunde / Rückrunde Toggle -->
+                <div class="card" style="margin-bottom: 1rem;">
+                    <div class="card-body" style="padding: 0.75rem 1rem;">
+                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            <span style="font-weight: 600; margin-right: 0.5rem;">Modus:</span>
+                            <button class="btn btn-sm" id="btnHinrunde" style="background: var(--primary); color: white;">Hinrunde</button>
+                            <button class="btn btn-sm btn-secondary" id="btnRueckrunde">Rückrunde</button>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card" style="margin-bottom: 1.5rem;">
                     <div class="card-body">
                         <div class="upload-zone" id="uploadZone">
@@ -60,6 +71,21 @@
                             <p>Excel-Datei (.xlsx) hierher ziehen oder <strong>klicken</strong></p>
                             <p id="fileName" class="file-selected" style="display:none;"></p>
                             <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Rückrunde: Einteilungs-Excel Upload (initially hidden) -->
+                <div class="card" id="rueckrundeUploadCard" style="margin-bottom: 1.5rem; display: none;">
+                    <div class="card-body">
+                        <div class="upload-zone" id="uploadZoneEinteilung" style="border-color: var(--primary);">
+                            <div class="upload-zone-icon">
+                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                            </div>
+                            <h3>Einteilungs-Excel hochladen</h3>
+                            <p>Staffelzuordnungen vom Spielleiter (.xlsx)</p>
+                            <p id="fileNameEinteilung" class="file-selected" style="display:none;"></p>
+                            <input type="file" id="fileInputEinteilung" accept=".xlsx,.xls" hidden>
                         </div>
                     </div>
                 </div>

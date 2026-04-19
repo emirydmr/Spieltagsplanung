@@ -159,10 +159,12 @@ def parse_meldeliste(excel_path: str) -> list[Mannschaft]:
         topf = _topf_ableiten(ms_nr, topf_explicit)
 
         # Spielstätte: je nach Format
-        if "strasse" in col_map and _get(row, col_map, "strasse"):
+        strasse_val = _get(row, col_map, "strasse", "")
+        strasse_is_formula = isinstance(strasse_val, str) and str(strasse_val).startswith("=")
+        if "strasse" in col_map and strasse_val and not strasse_is_formula:
             spielstaette = _parse_spielstaette_from_columns(
                 name=_get(row, col_map, "spielstaette_name", ""),
-                strasse=_get(row, col_map, "strasse", ""),
+                strasse=strasse_val,
                 plz=_get(row, col_map, "plz", ""),
                 ort=_get(row, col_map, "ort", ""),
             )

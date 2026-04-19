@@ -185,7 +185,7 @@ def generiere_spielplan(
         spieltage_list.extend(rueckrunde)
 
     return StaffelSpielplan(
-        staffel_name=f"Staffel {staffel_idx + 1}",
+        staffel_name=staffel_data.get("staffel_name", f"Staffel {staffel_idx + 1}"),
         altersklasse=altersklasse,
         topf=topf,
         staffel_idx=staffel_idx,
