@@ -5,8 +5,14 @@ Erzeugt für jede Staffel einen konkreten Spielplan mit:
   - Paarungen (Heim vs. Gast) mit eigener Zeit + Spielfeld
   - Spielfreie Mannschaft (bei ungerader Staffelgröße)
   - Spielfeld-Kollisionserkennung und -auflösung
+  - Spieltag-Reordering: Permutiert die Zuordnung Spieltag→Datum,
+    um Cross-Staffel Venue-Kollisionen vorab zu minimieren
 """
 
+import itertools
+import math
+import random
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -250,6 +256,11 @@ def generiere_alle_spielplaene(
             )
             alle_plaene.append(plan)
 
+    # Spieltag-Reordering: Cross-Staffel Venue-Kollisionen minimieren
+    saved = _optimiere_spieltag_reihenfolge(alle_plaene)
+    if saved > 0:
+        print(f"[Reorder] Gesamt: {saved} Venue-Kollisionen eingespart")
+
     # CP-SAT Slot-Vergabe: globale Optimierung, konfliktfrei
     from src.spielplanerstellung.slot_solver import solve_game_slots
     solve_game_slots(alle_plaene, wuensche=wuensche, time_limit_seconds=600)
@@ -262,6 +273,140 @@ def generiere_alle_spielplaene(
         _update_wunsch_verletzungen(alle_plaene, wuensche)
 
     return alle_plaene
+
+
+def _optimiere_spieltag_reihenfolge(
+    alle_plaene: list[StaffelSpielplan],
+    max_passes: int = 3,
+) -> int:
+    """Permutiert pro Staffel die Zuordnung Spieltag → Kalenderdatum.
+
+    Paarungen (wer gegen wen) bleiben gleich – nur WANN sie stattfinden ändert sich.
+    Minimiert die Anzahl an (Venue, Datum)-Kollisionen zwischen verschiedenen Staffeln,
+    damit der nachfolgende CP-SAT Slot-Solver weniger Konflikte auflösen muss.
+
+    Algorithmus:
+      - Pro Staffel: alle Permutationen der Spieltag-Daten durchprobieren (≤9! = 362.880)
+      - Scoring: Anzahl (Venue, Datum)-Paare, die schon von anderen Staffeln belegt sind
+      - Mehrere Durchläufe, da Umordnung einer Staffel neue Optionen für andere öffnet
+      - Für >9 Spieltage: Simulated Annealing statt Brute-Force
+
+    Returns: Gesamtzahl eingesparter Kollisionen.
+    """
+    total_saved = 0
+
+    for _pass in range(max_passes):
+        pass_saved = 0
+
+        for plan_idx, plan in enumerate(alle_plaene):
+            # Nur Hinrunde-Spieltage (Rückrunde hat datum=None)
+            hinrunde_st = [st for st in plan.spieltage if st.datum is not None]
+            if len(hinrunde_st) <= 1:
+                continue
+
+            n = len(hinrunde_st)
+            dates = [st.datum for st in hinrunde_st]
+
+            # Anstoßzeiten extrahieren (Sommer/Winter)
+            summer_time = winter_time = hinrunde_st[0].anstosszeit
+            for st in hinrunde_st:
+                if st.datum.month in (11, 12, 1, 2):
+                    winter_time = st.anstosszeit
+                else:
+                    summer_time = st.anstosszeit
+
+            # Heim-Venues pro Spieltag (Index in hinrunde_st)
+            heim_venues_per_st: list[list[str]] = []
+            for st in hinrunde_st:
+                venues = []
+                for spiel in st.spiele:
+                    if spiel.spielfeld:
+                        venues.append(spiel.spielfeld.strip().lower())
+                heim_venues_per_st.append(venues)
+
+            # Venue-Belegung aller ANDEREN Pläne: (venue, date_iso) → Anzahl
+            other_usage: dict[tuple[str, str], int] = defaultdict(int)
+            for i, other in enumerate(alle_plaene):
+                if i == plan_idx:
+                    continue
+                for st in other.spieltage:
+                    if not st.datum:
+                        continue
+                    for spiel in st.spiele:
+                        if spiel.spielfeld:
+                            key = (spiel.spielfeld.strip().lower(), st.datum.isoformat())
+                            other_usage[key] += 1
+
+            # Scoring: Kosten-Matrix [spieltag_i][date_j] → Kollisionen
+            # wenn Spieltag i auf Datum j gelegt wird
+            date_isos = [d.isoformat() for d in dates]
+            cost_matrix: list[list[int]] = []
+            for i in range(n):
+                row = []
+                for j in range(n):
+                    c = sum(other_usage.get((v, date_isos[j]), 0)
+                            for v in heim_venues_per_st[i])
+                    row.append(c)
+                cost_matrix.append(row)
+
+            current_score = sum(cost_matrix[i][i] for i in range(n))
+            if current_score == 0:
+                continue
+
+            best_perm = list(range(n))
+            best_score = current_score
+
+            if math.factorial(n) <= 500_000:  # ≤9 Spieltage → Brute-Force
+                for perm in itertools.permutations(range(n)):
+                    s = sum(cost_matrix[i][perm[i]] for i in range(n))
+                    if s < best_score:
+                        best_score = s
+                        best_perm = list(perm)
+                    if best_score == 0:
+                        break
+            else:  # >9 Spieltage → Simulated Annealing
+                cur_perm = list(range(n))
+                cur_s = current_score
+                for step in range(50_000):
+                    t = 10.0 * (0.001 ** (step / 49_999))
+                    i, j = random.sample(range(n), 2)
+                    new_perm = list(cur_perm)
+                    new_perm[i], new_perm[j] = new_perm[j], new_perm[i]
+                    new_s = sum(cost_matrix[k][new_perm[k]] for k in range(n))
+                    delta = new_s - cur_s
+                    if delta < 0 or random.random() < math.exp(-delta / max(t, 1e-10)):
+                        cur_perm = new_perm
+                        cur_s = new_s
+                        if cur_s < best_score:
+                            best_score = cur_s
+                            best_perm = list(cur_perm)
+                    if best_score == 0:
+                        break
+
+            if best_score < current_score:
+                # Permutation anwenden: Daten + Anstoßzeiten reassignen
+                new_dates = [dates[best_perm[i]] for i in range(n)]
+                for i, st in enumerate(hinrunde_st):
+                    new_dt = new_dates[i]
+                    new_zeit = (winter_time if new_dt.month in (11, 12, 1, 2)
+                                else summer_time)
+                    st.datum = new_dt
+                    st.anstosszeit = new_zeit
+                    for spiel in st.spiele:
+                        spiel.datum = new_dt
+                        spiel.anstosszeit = new_zeit
+
+                saved = current_score - best_score
+                pass_saved += saved
+                total_saved += saved
+                print(f"[Reorder] {plan.altersklasse} {plan.staffel_name}: "
+                      f"{current_score} → {best_score} Kollisionen (-{saved})")
+
+        if pass_saved == 0:
+            break
+        print(f"[Reorder] Pass {_pass + 1}: {pass_saved} Kollisionen eingespart")
+
+    return total_saved
 
 
 def _update_platz_konflikte(plaene: list[StaffelSpielplan]) -> None:
