@@ -256,6 +256,10 @@ def generiere_alle_spielplaene(
             )
             alle_plaene.append(plan)
 
+    # Cross-Staffel SZ-Optimierung: Swappt Teams innerhalb Staffeln
+    # um Venue-Kollisionen zwischen Staffeln zu reduzieren
+    _optimiere_sz_cross_staffel(alle_plaene)
+
     # Spieltag-Reordering: Cross-Staffel Venue-Kollisionen minimieren
     saved = _optimiere_spieltag_reihenfolge(alle_plaene)
     if saved > 0:
@@ -273,6 +277,265 @@ def generiere_alle_spielplaene(
         _update_wunsch_verletzungen(alle_plaene, wuensche)
 
     return alle_plaene
+
+
+def _rebuild_spieltage(plan: StaffelSpielplan) -> None:
+    """Baut Spieltage aus den aktuellen sz_zuordnungen neu auf.
+
+    Wird nach Cross-Staffel SZ-Swaps aufgerufen, um die Spiel-Objekte
+    mit den neuen Paarungen konsistent zu machen. Behält Daten und Zeiten bei.
+    """
+    sz_to_team = {z.sz: z for z in plan.sz_zuordnungen}
+    paarungen = get_paarungen_pro_spieltag(plan.n_teams)
+    n_spieltage = get_n_spieltage(plan.n_teams)
+
+    # Vorhandene Daten/Zeiten übernehmen
+    old_data = {st.nummer: (st.datum, st.anstosszeit) for st in plan.spieltage}
+
+    new_spieltage = []
+    for spieltag_nr in sorted(paarungen.keys()):
+        matches = paarungen[spieltag_nr]
+        datum, anstosszeit = old_data.get(spieltag_nr, (None, ""))
+
+        spiele = []
+        spielfrei = None
+
+        for h_sz, g_sz in matches:
+            h_team = sz_to_team.get(h_sz)
+            g_team = sz_to_team.get(g_sz)
+
+            if h_team is None and g_team is not None:
+                spielfrei = g_team.mannschaft
+                continue
+            elif g_team is None and h_team is not None:
+                spielfrei = h_team.mannschaft
+                continue
+            elif h_team is None and g_team is None:
+                continue
+
+            spiele.append(Spiel(
+                heim=h_team.mannschaft,
+                gast=g_team.mannschaft,
+                heim_verein=h_team.verein,
+                gast_verein=g_team.verein,
+                datum=datum,
+                anstosszeit=anstosszeit,
+                spielfeld=h_team.adresse or "",
+            ))
+
+        new_spieltage.append(Spieltag(
+            nummer=spieltag_nr,
+            datum=datum,
+            anstosszeit=anstosszeit,
+            spiele=spiele,
+            spielfrei=spielfrei,
+        ))
+
+    if plan.doppelrunde:
+        for st in list(new_spieltage):
+            rueck = [
+                Spiel(
+                    heim=s.gast, gast=s.heim,
+                    heim_verein=s.gast_verein, gast_verein=s.heim_verein,
+                    datum=None, anstosszeit=s.anstosszeit,
+                    spielfeld=_find_adresse(plan.sz_zuordnungen, s.gast),
+                )
+                for s in st.spiele
+            ]
+            new_spieltage.append(Spieltag(
+                nummer=st.nummer + n_spieltage,
+                datum=None, anstosszeit=st.anstosszeit,
+                spiele=rueck, spielfrei=st.spielfrei,
+            ))
+
+    plan.spieltage = new_spieltage
+
+
+def _optimiere_sz_cross_staffel(
+    alle_plaene: list[StaffelSpielplan],
+    max_rounds: int = 5,
+) -> int:
+    """Optimiert SZ-Zuordnungen staffelübergreifend.
+
+    Swappt Paare von Teams innerhalb derselben Staffel, sodass deren
+    Heimspiel-Daten sich weniger mit anderen Staffeln überschneiden.
+
+    Paarungen bleiben korrekt (Schlüsselplan unverändert) – nur welches
+    Team welche SZ bekommt ändert sich. Beispiel:
+      - Team A (Venue X) war SZ 3 → Heim an Spieltag 1,3,5
+      - Team B (Venue Y) war SZ 5 → Heim an Spieltag 2,4,6
+      - Nach Swap: A ist SZ 5 (Heim an 2,4,6), B ist SZ 3 (Heim an 1,3,5)
+      - Wenn Venue X an Spieltag 1 Konflikte hatte, sind die jetzt weg
+
+    Returns: Gesamtzahl akzeptierter Swaps.
+    """
+    n_plans = len(alle_plaene)
+
+    # Spieltag → Datum pro Plan
+    plan_st_dates: list[dict[int, date]] = []
+    for plan in alle_plaene:
+        plan_st_dates.append({st.nummer: st.datum for st in plan.spieltage if st.datum})
+
+    # SZ → Heim-Spieltage (gecached pro Staffelgröße)
+    _heim_cache: dict[int, dict[int, frozenset]] = {}
+
+    def heim_spieltage(n_teams: int) -> dict[int, frozenset]:
+        if n_teams not in _heim_cache:
+            paarungen = get_paarungen_pro_spieltag(n_teams)
+            h: dict[int, set] = defaultdict(set)
+            for st_nr, matches in paarungen.items():
+                for h_sz, _g_sz in matches:
+                    h[h_sz].add(st_nr)
+            _heim_cache[n_teams] = {sz: frozenset(sts) for sz, sts in h.items()}
+        return _heim_cache[n_teams]
+
+    # SZ → Mannschaft pro Plan (veränderbar)
+    plan_sz_team: list[dict[int, str]] = []
+    # Mannschaft → Venue pro Plan (fix)
+    team_venue: list[dict[str, str]] = []
+    for plan in alle_plaene:
+        plan_sz_team.append({z.sz: z.mannschaft for z in plan.sz_zuordnungen})
+        team_venue.append({
+            z.mannschaft: (z.adresse or "").strip().lower()
+            for z in plan.sz_zuordnungen
+        })
+
+    def plan_home_vds(pi: int) -> set[tuple[str, str]]:
+        """Alle (venue, date_iso) Heimspiel-Paare für Plan pi."""
+        hs = heim_spieltage(alle_plaene[pi].n_teams)
+        dates = plan_st_dates[pi]
+        vds: set[tuple[str, str]] = set()
+        for sz, mannschaft in plan_sz_team[pi].items():
+            venue = team_venue[pi].get(mannschaft, "")
+            if not venue:
+                continue
+            for st_nr in hs.get(sz, frozenset()):
+                dt = dates.get(st_nr)
+                if dt:
+                    vds.add((venue, dt.isoformat()))
+        return vds
+
+    # Globale Venue-Belegung: (venue, date) → {plan_idx: count}
+    global_usage: dict[tuple[str, str], dict[int, int]] = defaultdict(
+        lambda: defaultdict(int)
+    )
+    for pi in range(n_plans):
+        for vd in plan_home_vds(pi):
+            global_usage[vd][pi] += 1
+
+    def total_conflicts() -> int:
+        return sum(
+            max(0, sum(1 for c in pcs.values() if c > 0) - 1)
+            for pcs in global_usage.values()
+        )
+
+    initial = total_conflicts()
+    if initial == 0:
+        return 0
+
+    total_swaps = 0
+    last_round = 0
+
+    for round_nr in range(max_rounds):
+        round_swaps = 0
+        last_round = round_nr
+
+        for pi in range(n_plans):
+            plan = alle_plaene[pi]
+            hs = heim_spieltage(plan.n_teams)
+            dates = plan_st_dates[pi]
+            sz_team = plan_sz_team[pi]
+            tv = team_venue[pi]
+            szs = sorted(sz_team.keys())
+            if len(szs) < 2:
+                continue
+
+            def plan_conflicts(st_map: dict[int, str]) -> int:
+                c = 0
+                for sz, mann in st_map.items():
+                    venue = tv.get(mann, "")
+                    if not venue:
+                        continue
+                    for st_nr in hs.get(sz, frozenset()):
+                        dt = dates.get(st_nr)
+                        if dt:
+                            vd = (venue, dt.isoformat())
+                            others = sum(
+                                1 for p, cnt in global_usage.get(vd, {}).items()
+                                if p != pi and cnt > 0
+                            )
+                            if others > 0:
+                                c += 1
+                return c
+
+            current_c = plan_conflicts(sz_team)
+            if current_c == 0:
+                continue
+
+            best_swap = None
+            best_c = current_c
+
+            for i in range(len(szs)):
+                for j in range(i + 1, len(szs)):
+                    sa, sb = szs[i], szs[j]
+                    # Gleiche Venue → Swap ändert nichts
+                    if tv.get(sz_team[sa], "") == tv.get(sz_team[sb], ""):
+                        continue
+                    trial = dict(sz_team)
+                    trial[sa], trial[sb] = trial[sb], trial[sa]
+                    tc = plan_conflicts(trial)
+                    if tc < best_c:
+                        best_c = tc
+                        best_swap = (sa, sb)
+
+            if best_swap:
+                sa, sb = best_swap
+                # Global usage aktualisieren
+                for vd in plan_home_vds(pi):
+                    global_usage[vd][pi] -= 1
+                    if global_usage[vd][pi] <= 0:
+                        del global_usage[vd][pi]
+                # Swap anwenden
+                sz_team[sa], sz_team[sb] = sz_team[sb], sz_team[sa]
+                # Neue Einträge
+                for vd in plan_home_vds(pi):
+                    global_usage[vd][pi] += 1
+
+                round_swaps += 1
+                total_swaps += 1
+
+        if round_swaps == 0:
+            break
+
+    if total_swaps == 0:
+        return 0
+
+    final = total_conflicts()
+    print(f"[Cross-SZ] {initial} → {final} Kollisionen "
+          f"({total_swaps} SZ-Swaps in {last_round + 1} Runden)")
+
+    # Geänderte Pläne aktualisieren: SZ-Zuordnungen + Spieltage neu aufbauen
+    modified = 0
+    for pi, plan in enumerate(alle_plaene):
+        new_sz_team = plan_sz_team[pi]
+        old_sz_team = {z.sz: z.mannschaft for z in plan.sz_zuordnungen}
+        if new_sz_team != old_sz_team:
+            modified += 1
+            mannschaft_info = {z.mannschaft: z for z in plan.sz_zuordnungen}
+            new_zuordnungen = []
+            for sz in sorted(new_sz_team.keys()):
+                mannschaft = new_sz_team[sz]
+                orig = mannschaft_info[mannschaft]
+                new_zuordnungen.append(SZZuordnung(
+                    mannschaft=orig.mannschaft, verein=orig.verein, sz=sz,
+                    region=orig.region, lat=orig.lat, lon=orig.lon,
+                    adresse=orig.adresse,
+                ))
+            plan.sz_zuordnungen = new_zuordnungen
+            _rebuild_spieltage(plan)
+
+    print(f"[Cross-SZ] {modified} Staffeln neu aufgebaut")
+    return total_swaps
 
 
 def _optimiere_spieltag_reihenfolge(
