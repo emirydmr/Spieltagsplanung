@@ -8,6 +8,7 @@ import sys
 import tempfile
 import shutil
 import json
+import time as _time
 from datetime import datetime
 from pathlib import Path
 
@@ -99,6 +100,8 @@ async def api_einteilung(
 
         for (ak, sk, topf), ms in sorted(gruppen.items()):
             topf_str = f"Topf {topf}" if topf > 0 else "fix"
+            print(f"[Einteilung] {ak} {sk} {topf_str} – {len(ms)} Teams ...", flush=True)
+            t0 = _time.time()
 
             gruppe_data = {
                 "altersklasse": ak,
@@ -135,6 +138,7 @@ async def api_einteilung(
                 gruppe_data["staffeln"].append(_staffel_to_dict(staffel))
 
             result["gruppen"].append(gruppe_data)
+            print(f"[Einteilung] {ak} {sk} {topf_str} – fertig in {_time.time() - t0:.1f}s", flush=True)
 
         return JSONResponse(result)
 

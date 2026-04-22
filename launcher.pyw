@@ -189,13 +189,16 @@ class LauncherApp:
     def _start_server(self):
         try:
             env = os.environ.copy()
+            log_file = ROOT / "output" / "server.log"
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            self._log_handle = open(log_file, "w", encoding="utf-8")
             self.server_process = subprocess.Popen(
                 [str(VENV_PYTHON), "-m", "uvicorn",
                  "src.api.server:app", "--host", "127.0.0.1", "--port", "8000"],
                 cwd=str(ROOT),
                 env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=self._log_handle,
+                stderr=self._log_handle,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
 

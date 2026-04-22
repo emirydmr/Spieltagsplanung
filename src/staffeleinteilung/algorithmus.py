@@ -10,10 +10,26 @@ Ablauf:
 
 import math
 import random
+import time
+import sys
 from collections import defaultdict
+from pathlib import Path
 
 from src.common.models import Mannschaft
 from src.staffeleinteilung.scoring import berechne_score, ScoreGewichte, ScoreDetail
+
+_LOG_FILE = Path(__file__).resolve().parent.parent.parent / "output" / "einteilung_log.txt"
+
+
+def _log(msg: str) -> None:
+    """Gibt eine Nachricht auf stdout und in die Log-Datei aus."""
+    print(msg, flush=True)
+    try:
+        _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
 
 
 def _hat_koordinaten(m: Mannschaft) -> bool:
@@ -178,9 +194,24 @@ def _optimiere_swaps(
     """
     akzeptiert = 0
     seit_letzter_verbesserung = 0
+    iterationen = 0
+    start_time = time.time()
     aktueller_score = berechne_score(staffeln, gewichte).total
+    n_teams = sum(len(s) for s in staffeln)
+
+    _log(f"      Swap-Optimierung: {n_teams} Teams, {len(staffeln)} Staffeln, "
+         f"max {max_ohne_verbesserung} ohne Verbesserung")
 
     while seit_letzter_verbesserung < max_ohne_verbesserung:
+        iterationen += 1
+
+        # Fortschritt alle 500 Iterationen loggen
+        if iterationen % 500 == 0:
+            elapsed = time.time() - start_time
+            _log(f"      ... Iteration {iterationen}, Score={aktueller_score:.1f}, "
+                 f"Swaps={akzeptiert}, Stagnation={seit_letzter_verbesserung}/{max_ohne_verbesserung}, "
+                 f"Zeit={elapsed:.1f}s")
+
         # Wähle zwei verschiedene Staffeln
         if len(staffeln) < 2:
             break
@@ -207,6 +238,8 @@ def _optimiere_swaps(
             staffeln[s1][t1], staffeln[s2][t2] = staffeln[s2][t2], staffeln[s1][t1]
             seit_letzter_verbesserung += 1
 
+    elapsed = time.time() - start_time
+    _log(f"      Fertig: {iterationen} Iterationen, {akzeptiert} Swaps, {elapsed:.1f}s")
     return akzeptiert
 
 
@@ -250,7 +283,7 @@ def einteilung_erstellen(
     staffeln = _initiale_zuweisung_geo(mannschaften, n_staffeln)
 
     score_initial = berechne_score(staffeln, gewichte)
-    print(f"    Initial ({n_staffeln} Staffeln): Score={score_initial.total:.1f} "
+    _log(f"    Initial ({n_staffeln} Staffeln): Score={score_initial.total:.1f} "
           f"(Distanz={score_initial.distanz_score:.1f}km, "
           f"Region={score_initial.region_score:.0f}, "
           f"Violations={score_initial.hard_violations})")
@@ -259,12 +292,12 @@ def einteilung_erstellen(
     n_swaps = _repariere_verein_duplikate(staffeln)
     if n_swaps > 0:
         score_nach_repair = berechne_score(staffeln, gewichte)
-        print(f"    Nach Duplikat-Reparatur ({n_swaps} Swaps): Score={score_nach_repair.total:.1f}")
+        _log(f"    Nach Duplikat-Reparatur ({n_swaps} Swaps): Score={score_nach_repair.total:.1f}")
 
     # 4. Optimierung durch zufällige Swaps (bis Konvergenz)
     n_optim = _optimiere_swaps(staffeln, gewichte, max_ohne_verbesserung=n * 30)
     score_final = berechne_score(staffeln, gewichte)
-    print(f"    Nach Optimierung ({n_optim} Swaps): Score={score_final.total:.1f} "
+    _log(f"    Nach Optimierung ({n_optim} Swaps): Score={score_final.total:.1f} "
           f"(Distanz={score_final.distanz_score:.1f}km, "
           f"Region={score_final.region_score:.0f}, "
           f"Violations={score_final.hard_violations})")
