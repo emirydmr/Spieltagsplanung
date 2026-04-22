@@ -1,10 +1,10 @@
-"""Schlüsselpläne (Round-Robin-Paarungstabellen) nach DFBnet 1-L Schema.
+﻿"""Schlüsselpläne (Round-Robin-Paarungstabellen) nach DFBnet 1-L Schema.
 
 Für jede geradzahlige Staffelgröße (4, 6, 8, 10, 12, 14, 16) ist eine
 Tabelle hinterlegt, die pro Schlüsseltag die Paarungen (Heim-SZ, Gast-SZ) enthält.
 
 Ungerade Staffelgrößen (5, 7, 9, 11) nutzen den nächsthöheren geraden Plan:
-SZ 1 wird nicht vergeben → Team gegen SZ 1 hat spielfrei.
+SZ 1 wird nicht vergeben -> Team gegen SZ 1 hat spielfrei.
 
 Schlüsseltag-Reihenfolge: Im DFBnet gilt "1-L", d.h. Schlüsseltag 1 ist der
 LETZTE Spieltag. Umrechnung: spieltag = n_schluesseltage - schluesseltag + 1
@@ -100,7 +100,7 @@ def get_schluesselplan(staffelgroesse: int) -> dict[int, list[tuple[int, int]]]:
     if staffelgroesse in SCHLUESSELPLAENE:
         return SCHLUESSELPLAENE[staffelgroesse]
 
-    # Ungerade → nächsthöhere gerade Größe
+    # Ungerade -> nächsthöhere gerade Größe
     even_size = staffelgroesse + 1
     if even_size in SCHLUESSELPLAENE:
         return SCHLUESSELPLAENE[even_size]
@@ -115,7 +115,7 @@ def get_n_spieltage(staffelgroesse: int) -> int:
 
 
 def schluesseltag_to_spieltag(schluesseltag: int, n_spieltage: int) -> int:
-    """Wandelt Schlüsseltag → Spieltag (1-L Umrechnung)."""
+    """Wandelt Schlüsseltag -> Spieltag (1-L Umrechnung)."""
     return n_spieltage - schluesseltag + 1
 
 

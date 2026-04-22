@@ -1,8 +1,8 @@
-"""Rahmenterminkalender Hinrunde 2025/2026 – Bezirk Franken Jugend.
+﻿"""Rahmenterminkalender Hinrunde 2025/2026 – Bezirk Franken Jugend.
 
 Definiert pro Altersklasse/Region:
   - Regelspieltag (Wochentag + Anstoßzeit)
-  - Spieltag-Termine (Spieltag-Nr. → Datum)
+  - Spieltag-Termine (Spieltag-Nr. -> Datum)
 """
 
 from dataclasses import dataclass
@@ -35,7 +35,7 @@ A_JUNIOREN_10 = Terminplan(
         4: date(2025, 10, 11),
         5: date(2025, 10, 18),
         6: date(2025, 10, 25),
-        # 2025-11-01 = Allerheiligen → spielfrei
+        # 2025-11-01 = Allerheiligen -> spielfrei
         7: date(2025, 11, 8),
         8: date(2025, 11, 15),
         9: date(2025, 11, 22),
@@ -74,10 +74,10 @@ B_JUNIOREN_RST_10 = Terminplan(
         4: date(2025, 10, 12),
         5: date(2025, 10, 19),
         6: date(2025, 10, 26),
-        # 2025-11-02 → spielfrei
+        # 2025-11-02 -> spielfrei
         7: date(2025, 11, 9),
         8: date(2025, 11, 16),
-        9: date(2025, 11, 30),  # Totensonntag → verschoben
+        9: date(2025, 11, 30),  # Totensonntag -> verschoben
     },
 )
 
@@ -96,7 +96,7 @@ B_JUNIOREN_QST_10 = Terminplan(
         4: date(2025, 10, 10),
         5: date(2025, 10, 17),
         6: date(2025, 10, 24),
-        # 2025-10-31 → spielfrei
+        # 2025-10-31 -> spielfrei
         7: date(2025, 11, 7),
         8: date(2025, 11, 14),
         9: date(2025, 11, 21),

@@ -1,11 +1,11 @@
-"""Spielplan-Generator: Kombiniert Schlüsselplan + Terminplan + SZ-Vergabe.
+﻿"""Spielplan-Generator: Kombiniert Schlüsselplan + Terminplan + SZ-Vergabe.
 
 Erzeugt für jede Staffel einen konkreten Spielplan mit:
   - Spieltag-Nummer, Datum, Anstoßzeit
   - Paarungen (Heim vs. Gast) mit eigener Zeit + Spielfeld
   - Spielfreie Mannschaft (bei ungerader Staffelgröße)
   - Spielfeld-Kollisionserkennung und -auflösung
-  - Spieltag-Reordering: Permutiert die Zuordnung Spieltag→Datum,
+  - Spieltag-Reordering: Permutiert die Zuordnung Spieltag->Datum,
     um Cross-Staffel Venue-Kollisionen vorab zu minimieren
 """
 
@@ -118,7 +118,7 @@ def generiere_spielplan(
         spieltag_dates=spieltag_dates if spieltag_dates else None,
     )
 
-    # Build SZ→Team lookup
+    # Build SZ->Team lookup
     sz_to_team = {z.sz: z for z in sz_zuordnungen}
 
     # 3. Paarungen pro Spieltag
@@ -133,7 +133,7 @@ def generiere_spielplan(
         anstosszeit = ""
         if terminplan and spieltag_nr in terminplan.spieltage:
             datum = terminplan.spieltage[spieltag_nr]
-            # Nov-Feb → Winterzeit
+            # Nov-Feb -> Winterzeit
             if datum and datum.month in (11, 12, 1, 2):
                 anstosszeit = terminplan.anstosszeit_winter
             else:
@@ -147,11 +147,11 @@ def generiere_spielplan(
             g_team = sz_to_team.get(g_sz)
 
             if h_team is None and g_team is not None:
-                # h_sz = 1 (bye for odd staffels) → g_team hat spielfrei
+                # h_sz = 1 (bye for odd staffels) -> g_team hat spielfrei
                 spielfrei = g_team.mannschaft
                 continue
             elif g_team is None and h_team is not None:
-                # g_sz = 1 → h_team hat spielfrei
+                # g_sz = 1 -> h_team hat spielfrei
                 spielfrei = h_team.mannschaft
                 continue
             elif h_team is None and g_team is None:
@@ -375,8 +375,8 @@ def _optimiere_sz_cross_staffel(
 
     Paarungen bleiben korrekt (Schlüsselplan unverändert) – nur welches
     Team welche SZ bekommt ändert sich. Beispiel:
-      - Team A (Venue X) war SZ 3 → Heim an Spieltag 1,3,5
-      - Team B (Venue Y) war SZ 5 → Heim an Spieltag 2,4,6
+      - Team A (Venue X) war SZ 3 -> Heim an Spieltag 1,3,5
+      - Team B (Venue Y) war SZ 5 -> Heim an Spieltag 2,4,6
       - Nach Swap: A ist SZ 5 (Heim an 2,4,6), B ist SZ 3 (Heim an 1,3,5)
       - Wenn Venue X an Spieltag 1 Konflikte hatte, sind die jetzt weg
 
@@ -384,12 +384,12 @@ def _optimiere_sz_cross_staffel(
     """
     n_plans = len(alle_plaene)
 
-    # Spieltag → Datum pro Plan
+    # Spieltag -> Datum pro Plan
     plan_st_dates: list[dict[int, date]] = []
     for plan in alle_plaene:
         plan_st_dates.append({st.nummer: st.datum for st in plan.spieltage if st.datum})
 
-    # SZ → Heim-Spieltage (gecached pro Staffelgröße)
+    # SZ -> Heim-Spieltage (gecached pro Staffelgröße)
     _heim_cache: dict[int, dict[int, frozenset]] = {}
 
     def heim_spieltage(n_teams: int) -> dict[int, frozenset]:
@@ -402,9 +402,9 @@ def _optimiere_sz_cross_staffel(
             _heim_cache[n_teams] = {sz: frozenset(sts) for sz, sts in h.items()}
         return _heim_cache[n_teams]
 
-    # SZ → Mannschaft pro Plan (veränderbar)
+    # SZ -> Mannschaft pro Plan (veränderbar)
     plan_sz_team: list[dict[int, str]] = []
-    # Mannschaft → Venue pro Plan (fix)
+    # Mannschaft -> Venue pro Plan (fix)
     team_venue: list[dict[str, str]] = []
     for plan in alle_plaene:
         plan_sz_team.append({z.sz: z.mannschaft for z in plan.sz_zuordnungen})
@@ -428,7 +428,7 @@ def _optimiere_sz_cross_staffel(
                     vds.add((venue, dt.isoformat()))
         return vds
 
-    # Globale Venue-Belegung: (venue, date) → {plan_idx: count}
+    # Globale Venue-Belegung: (venue, date) -> {plan_idx: count}
     global_usage: dict[tuple[str, str], dict[int, int]] = defaultdict(
         lambda: defaultdict(int)
     )
@@ -491,7 +491,7 @@ def _optimiere_sz_cross_staffel(
             for i in range(len(szs)):
                 for j in range(i + 1, len(szs)):
                     sa, sb = szs[i], szs[j]
-                    # Gleiche Venue → Swap ändert nichts
+                    # Gleiche Venue -> Swap ändert nichts
                     if tv.get(sz_team[sa], "") == tv.get(sz_team[sb], ""):
                         continue
                     trial = dict(sz_team)
@@ -555,7 +555,7 @@ def _optimiere_spieltag_reihenfolge(
     alle_plaene: list[StaffelSpielplan],
     max_passes: int = 3,
 ) -> int:
-    """Permutiert pro Staffel die Zuordnung Spieltag → Kalenderdatum.
+    """Permutiert pro Staffel die Zuordnung Spieltag -> Kalenderdatum.
 
     Paarungen (wer gegen wen) bleiben gleich – nur WANN sie stattfinden ändert sich.
     Minimiert die Anzahl an (Venue, Datum)-Kollisionen zwischen verschiedenen Staffeln,
@@ -600,7 +600,7 @@ def _optimiere_spieltag_reihenfolge(
                         venues.append(spiel.spielfeld.strip().lower())
                 heim_venues_per_st.append(venues)
 
-            # Venue-Belegung aller ANDEREN Pläne: (venue, date_iso) → Anzahl
+            # Venue-Belegung aller ANDEREN Pläne: (venue, date_iso) -> Anzahl
             other_usage: dict[tuple[str, str], int] = defaultdict(int)
             for i, other in enumerate(alle_plaene):
                 if i == plan_idx:
@@ -613,7 +613,7 @@ def _optimiere_spieltag_reihenfolge(
                             key = (spiel.spielfeld.strip().lower(), st.datum.isoformat())
                             other_usage[key] += 1
 
-            # Scoring: Kosten-Matrix [spieltag_i][date_j] → Kollisionen
+            # Scoring: Kosten-Matrix [spieltag_i][date_j] -> Kollisionen
             # wenn Spieltag i auf Datum j gelegt wird
             date_isos = [d.isoformat() for d in dates]
             cost_matrix: list[list[int]] = []
@@ -632,7 +632,7 @@ def _optimiere_spieltag_reihenfolge(
             best_perm = list(range(n))
             best_score = current_score
 
-            if math.factorial(n) <= 500_000:  # ≤9 Spieltage → Brute-Force
+            if math.factorial(n) <= 500_000:  # ≤9 Spieltage -> Brute-Force
                 for perm in itertools.permutations(range(n)):
                     s = sum(cost_matrix[i][perm[i]] for i in range(n))
                     if s < best_score:
@@ -640,7 +640,7 @@ def _optimiere_spieltag_reihenfolge(
                         best_perm = list(perm)
                     if best_score == 0:
                         break
-            else:  # >9 Spieltage → Simulated Annealing
+            else:  # >9 Spieltage -> Simulated Annealing
                 cur_perm = list(range(n))
                 cur_s = current_score
                 for step in range(50_000):
@@ -676,7 +676,7 @@ def _optimiere_spieltag_reihenfolge(
                 pass_saved += saved
                 total_saved += saved
                 print(f"[Reorder] {plan.altersklasse} {plan.staffel_name}: "
-                      f"{current_score} → {best_score} Kollisionen (-{saved})")
+                      f"{current_score} -> {best_score} Kollisionen (-{saved})")
 
         if pass_saved == 0:
             break
@@ -708,7 +708,7 @@ def _update_platz_konflikte(plaene: list[StaffelSpielplan]) -> None:
                                       game_name, spiel.anstosszeit or "?",
                                       staffel_info, ort))
 
-    # Build per-game conflict details: game_name → [detail_dict, ...]
+    # Build per-game conflict details: game_name -> [detail_dict, ...]
     game_conflicts: dict[str, list[dict]] = defaultdict(list)
     for (feld, datum), entries in belegung.items():
         entries.sort()
@@ -940,12 +940,12 @@ def _assign_slots_incremental(plaene: list[StaffelSpielplan]) -> None:
 
     Vorgehen:
       1. Sammle alle Spiele aller Staffeln
-      2. Sortiere: jüngste AK zuerst → bekommen ihre Wunschzeit
+      2. Sortiere: jüngste AK zuerst -> bekommen ihre Wunschzeit
       3. Für jedes Spiel: finde an (spielfeld, datum) den ersten freien Slot
       4. Falls kein Slot frei: tausche Heim/Auswärts und probiere Gast-Venue
       5. Fallback: nächster freier Slot (auch nach Standardzeiten)
     """
-    # Globale Belegung: (venue_lower, datum_iso) → [(start_min, end_min, halbfeld)]
+    # Globale Belegung: (venue_lower, datum_iso) -> [(start_min, end_min, halbfeld)]
     venue_slots: dict[tuple[str, str], list[tuple[int, int, bool]]] = {}
 
     # Sammle alle Spiele mit Metadaten
@@ -961,7 +961,7 @@ def _assign_slots_incremental(plaene: list[StaffelSpielplan]) -> None:
 
     for _, plan, st, spiel in all_games:
         if not spiel.datum:
-            # Kein Datum (z.B. Rückrunde) → Standardzeit behalten
+            # Kein Datum (z.B. Rückrunde) -> Standardzeit behalten
             continue
 
         ak = plan.altersklasse
@@ -990,7 +990,7 @@ def _assign_slots_incremental(plaene: list[StaffelSpielplan]) -> None:
                 spiel.anstosszeit = _format_time(slot // 60, slot % 60)
                 continue
 
-        # Heim-Venue voll → versuche H/A-Tausch
+        # Heim-Venue voll -> versuche H/A-Tausch
         gast_addr = _find_adresse(plan.sz_zuordnungen, spiel.gast)
         gast_venue = gast_addr.strip().lower() if gast_addr else ""
 
@@ -1134,7 +1134,7 @@ def _ist_halbfeld(altersklasse: str) -> bool:
 
 
 def _parse_time(zeit_str: str) -> tuple[int, int] | None:
-    """Parst "14:15" → (14, 15). Gibt None zurück bei leerem/ungültigem String."""
+    """Parst "14:15" -> (14, 15). Gibt None zurück bei leerem/ungültigem String."""
     if not zeit_str or ":" not in zeit_str:
         return None
     try:
@@ -1145,7 +1145,7 @@ def _parse_time(zeit_str: str) -> tuple[int, int] | None:
 
 
 def _format_time(h: int, m: int) -> str:
-    """Formatiert (14, 15) → "14:15"."""
+    """Formatiert (14, 15) -> "14:15"."""
     return f"{h:02d}:{m:02d}"
 
 

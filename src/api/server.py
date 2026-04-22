@@ -1,10 +1,20 @@
-"""FastAPI Backend für die Spieltagsplanung.
+﻿"""FastAPI Backend für die Spieltagsplanung.
 
 Starten:
     python -m uvicorn src.api.server:app --reload --port 8000
 """
 
 import sys
+import os
+
+# Force UTF-8 stdout/stderr on Windows (prevents charmap codec errors)
+if sys.platform == "win32":
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import tempfile
 import shutil
 import json
@@ -70,7 +80,7 @@ async def api_einteilung(
     w_balance: float = 20.0,
     max_staffel_size: int = 11,
 ):
-    """Upload Meldeliste Excel → Staffeleinteilung berechnen."""
+    """Upload Meldeliste Excel -> Staffeleinteilung berechnen."""
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Nur Excel-Dateien (.xlsx) erlaubt")
 
@@ -524,7 +534,7 @@ def _build_rueckrunde_workbook(gruppen: list[dict], saison: str) -> Workbook:
             for s in g.get("staffeln", []):
                 ak_staffeln.append({"staffel": s, "gruppe": g})
 
-        # Sortiere: Bezirksstaffel → Leistungsstaffel → Kreisstaffel
+        # Sortiere: Bezirksstaffel -> Leistungsstaffel -> Kreisstaffel
         type_order = {"Bezirksstaffel": 0, "Leistungsstaffel": 1, "Kreisstaffel": 2}
         ak_staffeln.sort(key=lambda x: (
             type_order.get(x["gruppe"]["topf"], 3),
@@ -716,7 +726,7 @@ async def api_spielplan(request: Request):
     if not einteilung or not einteilung.get("gruppen"):
         raise HTTPException(400, "Keine Einteilung vorhanden")
 
-    # Sperrtage parsen (ISO-Strings → date-Objekte)
+    # Sperrtage parsen (ISO-Strings -> date-Objekte)
     from datetime import date as _date
     sperrtage = set()
     for s in (sperrtage_raw or []):
@@ -961,7 +971,7 @@ async def api_spielplan_export(request: Request):
     Akzeptiert entweder:
       - {"spielplaene": [...]} direkt
       - {"from_log": "spielplan_20260420_205718.json"} zum Laden aus Log
-      - {} (leer) → lädt automatisch den neuesten Log
+      - {} (leer) -> lädt automatisch den neuesten Log
     """
     data = await request.json()
     spielplaene = data.get("spielplaene")
@@ -1028,7 +1038,7 @@ async def api_spielplan_export(request: Request):
         sheet_name = f"{p['altersklasse']} {p['staffel_name']}"[:31]
         ws = wb.create_sheet(title=sheet_name)
 
-        # SZ-Lookup: Mannschaftsname → SZ-Nummer
+        # SZ-Lookup: Mannschaftsname -> SZ-Nummer
         sz_lookup = {}
         for z in p.get("sz_zuordnungen", []):
             sz_lookup[z["mannschaft"]] = z["sz"]
@@ -1171,7 +1181,7 @@ _PLATZ_KEYWORDS = _re.compile(
 
 
 def _saison_start_year(saison: str) -> int | None:
-    """Extrahiert das Startjahr aus z.B. '2025/26' → 2025."""
+    """Extrahiert das Startjahr aus z.B. '2025/26' -> 2025."""
     if not saison:
         return None
     try:
@@ -1181,7 +1191,7 @@ def _saison_start_year(saison: str) -> int | None:
 
 
 def _resolve_year(month: int, saison: str) -> int:
-    """Bestimmt das Jahr für einen Monat (Aug-Dez → Startjahr, Jan-Jul → Startjahr+1)."""
+    """Bestimmt das Jahr für einen Monat (Aug-Dez -> Startjahr, Jan-Jul -> Startjahr+1)."""
     start = _saison_start_year(saison)
     if start is None:
         from datetime import datetime
@@ -1210,7 +1220,7 @@ def _parse_wuensche_fast(
                 mannschaft = team.get("mannschaft", "")
                 wuensche: list[Wunsch] = []
 
-                # Normalisiere: _x000D_ (Excel-Zeilenumbruch) → Leerzeichen
+                # Normalisiere: _x000D_ (Excel-Zeilenumbruch) -> Leerzeichen
                 text_clean = text.replace("_x000D_", " ").replace("\r", " ").replace("\n", " ")
 
                 # Sammle alle Datums-Positionen (um sie von Uhrzeit-Erkennung auszuschließen)
@@ -1294,7 +1304,7 @@ def _parse_wuensche_fast(
 
                 # Wenn mehrere Wochentage: nur einen Wunsch mit dem übergeordneten Konzept
                 # Aber im Solver werden alle als Alternativen behandelt
-                # → Speichere EINEN Wunsch pro Wochentag, aber in _update_wunsch_verletzungen
+                # -> Speichere EINEN Wunsch pro Wochentag, aber in _update_wunsch_verletzungen
                 #   zählen wir nur als Verletzung wenn der Tag auf KEINEM der gewünschten Tage liegt
                 for wt_name in seen_wochentage:
                     wuensche.append(Wunsch(
@@ -1343,7 +1353,7 @@ def _parse_wuensche_fast(
 
                 # ── Heim/Auswärts-Beziehung ──
                 if _HEIM_KEYWORDS.search(text_clean) and _AUSW_KEYWORDS.search(text_clean):
-                    # "Wenn Heim, dann andere Auswärts" → Platzsharing-Hinweis
+                    # "Wenn Heim, dann andere Auswärts" -> Platzsharing-Hinweis
                     wuensche.append(Wunsch(
                         kategorie=WunschKategorie.PLATZSHARING,
                         prioritaet=WunschPrio.WEICH,

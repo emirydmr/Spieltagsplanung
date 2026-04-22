@@ -1,4 +1,4 @@
-"""CP-SAT-basierte Slot-Vergabe für konfliktfreie Spielplanung.
+﻿"""CP-SAT-basierte Slot-Vergabe für konfliktfreie Spielplanung.
 
 Ersetzt die greedy-inkrementelle Methode durch einen Constraint-Solver
 (Google OR-Tools CP-SAT), der global optimale Lösungen findet.
@@ -7,8 +7,8 @@ Kernidee:
   - Jedes Spiel kann auf alternative Tage innerhalb derselben KW ausweichen
   - Wochentag-Spiele frühestens 17:30
   - Cumulative-Constraint pro (Venue, Datum) mit Kapazität 2
-    → Halbfeld-Spiele (Demand 1): 2 parallel OK
-    → Großfeld-Spiele (Demand 2): blockieren das Feld komplett
+    -> Halbfeld-Spiele (Demand 1): 2 parallel OK
+    -> Großfeld-Spiele (Demand 2): blockieren das Feld komplett
   - Minimiert: Zeitabweichung + Datums-Abweichung + H/A-Tausch-Penalties
 """
 
@@ -152,7 +152,7 @@ _FAIRNESS_WEIGHT      = 3    # Gewicht zur Minimierung der max. Wunsch-Last pro 
 
 # ─── Solver ────────────────────────────────────────────────────
 
-# Wochentag-Name → date.weekday()
+# Wochentag-Name -> date.weekday()
 _WOCHENTAG_MAP = {
     "montag": 0, "dienstag": 1, "mittwoch": 2, "donnerstag": 3,
     "freitag": 4, "samstag": 5, "sonntag": 6,
@@ -367,7 +367,7 @@ def _generate_options(
             sperr_prio = sperrtage.get(dt_iso)
 
             if sperr_prio == WunschPrio.HART:
-                # Harter Sperrtag → Datum komplett ausschließen
+                # Harter Sperrtag -> Datum komplett ausschließen
                 continue
 
             base_pen = {
@@ -645,7 +645,7 @@ def _repair_cross_date_conflicts(
     Dieser Pass gruppiert nach tatsächlichem Datum und re-optimiert nur Gruppen
     mit Konflikten.
     """
-    # Baue aktuelle Belegung: (venue, datum) → [games]
+    # Baue aktuelle Belegung: (venue, datum) -> [games]
     all_games = _collect_games(plaene)
     if not all_games:
         return 0
@@ -731,7 +731,7 @@ def _find_wish_violations(
                     all_wished_wds.add(wd)
 
         if all_wished_wds and g.spiel.datum.weekday() not in all_wished_wds:
-            # Spiel auf keinem der gewünschten Tage → Verletzung
+            # Spiel auf keinem der gewünschten Tage -> Verletzung
             ref = g.spieltag.datum if g.spieltag.datum else g.spiel.datum
             erreichbar = False
             for target_wd in all_wished_wds:
@@ -819,7 +819,7 @@ def _global_wish_optimization(
         def _week_key(dt: date) -> tuple[int, int]:
             return dt.isocalendar()[:2]
 
-        # Index: (venue, week) → {gid}
+        # Index: (venue, week) -> {gid}
         venue_week_gids: dict[tuple[str, tuple[int, int]], set[int]] = defaultdict(set)
         for g in all_games:
             if g.spiel.datum and g.heim_venue:

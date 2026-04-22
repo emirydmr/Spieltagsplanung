@@ -1,4 +1,4 @@
-"""Parser für Einteilungs-Excel (Hinrunde und Rückrunde).
+﻿"""Parser für Einteilungs-Excel (Hinrunde und Rückrunde).
 
 Liest die vom Spielleiter vorgegebenen Staffelzuordnungen
 aus den Einteilungs-Excel-Dateien.
@@ -65,7 +65,7 @@ class RueckrundeStaffel:
 def _normalize_name(name: str) -> str:
     """Normalisiert einen Mannschaftsnamen für das Matching."""
     name = _STRIP_SUFFIXES.sub("", name).strip()
-    # Mehrfach-Leerzeichen → einfach
+    # Mehrfach-Leerzeichen -> einfach
     name = re.sub(r"\s+", " ", name)
     return name.lower()
 
@@ -218,7 +218,7 @@ def match_teams_gegen_meldeliste(
     Returns:
         (matched, unmatched) Anzahl
     """
-    # Index: (normalisierter Name, altersklasse) → Mannschaft
+    # Index: (normalisierter Name, altersklasse) -> Mannschaft
     ak_name_index: dict[tuple[str, str], Mannschaft] = {}
     # Fallback-Index ohne AK (für Juniorinnen etc.)
     name_index: dict[str, list[Mannschaft]] = {}

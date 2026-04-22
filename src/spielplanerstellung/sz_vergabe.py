@@ -1,4 +1,4 @@
-"""Schlüsselzahlen-Vergabe: Optimale Zuordnung von Teams zu SZ-Nummern.
+﻿"""Schlüsselzahlen-Vergabe: Optimale Zuordnung von Teams zu SZ-Nummern.
 
 Jedes Team in einer Staffel bekommt eine Schlüsselzahl (SZ).
 Die SZ bestimmt über den Schlüsselplan das gesamte Heim/Auswärts-Muster.
@@ -27,7 +27,7 @@ from src.spielplanerstellung.wuensche import Wunsch, WunschKategorie, WunschPrio
 from src.common.distanz import haversine_km
 
 
-# Wochentag-Name → date.weekday() (Montag=0 ... Sonntag=6)
+# Wochentag-Name -> date.weekday() (Montag=0 ... Sonntag=6)
 WOCHENTAG_MAP = {
     "montag": 0, "dienstag": 1, "mittwoch": 2, "donnerstag": 3,
     "freitag": 4, "samstag": 5, "sonntag": 6,
@@ -37,7 +37,7 @@ WOCHENTAG_MAP = {
 
 @dataclass
 class SZZuordnung:
-    """Ergebnis: Team → Schlüsselzahl Zuordnung."""
+    """Ergebnis: Team -> Schlüsselzahl Zuordnung."""
     mannschaft: str
     verein: str
     sz: int
@@ -181,8 +181,8 @@ def _score_zuordnung(
                         w, sz, paarungen, team_rolle, spieltag_dates, penalty)
 
     # ── 4. Platz-Konflikte (gleichzeitig Heim am selben Ort) ──
-    # 2 am gleichen Ort → leicht lösbar (gestaffelte Zeiten)
-    # 3+ → immer schwieriger, daher exponentiell
+    # 2 am gleichen Ort -> leicht lösbar (gestaffelte Zeiten)
+    # 3+ -> immer schwieriger, daher exponentiell
     for spieltag, matches in paarungen.items():
         heim_at_platz: dict[str, list[str]] = {}
         for h_sz, g_sz in matches:
@@ -240,7 +240,7 @@ def _check_heimwunsch(
         if dt == wunsch_date:
             rolle = team_rolle.get(st_nr, {}).get(sz)
             if rolle is None:
-                return 0  # spielfrei → kein Verstoß
+                return 0  # spielfrei -> kein Verstoß
             if want_heim and rolle != "heim":
                 return penalty
             if not want_heim and rolle != "gast":
@@ -289,7 +289,7 @@ def vergebe_schluesselzahlen(
     staffelgroesse: int,
     wuensche: dict[str, list[Wunsch]] | None = None,
     spieltag_dates: dict[int, date] | None = None,
-    max_permutations: int = 5_040,  # 7! = 5040 → Brute-Force bis 7 Teams
+    max_permutations: int = 5_040,  # 7! = 5040 -> Brute-Force bis 7 Teams
 ) -> tuple[list[SZZuordnung], SpielplanScore]:
     """Findet die optimale SZ-Zuordnung für eine Staffel.
 
@@ -297,7 +297,7 @@ def vergebe_schluesselzahlen(
       - Kleine Staffeln (≤7 Teams): Exakte Lösung (alle Permutationen)
       - Größere: Simulated Annealing mit Multi-Start
         - Temperatur sinkt exponentiell, erlaubt anfangs schlechtere Lösungen
-        - Mehrere unabhängige Starts → beste Lösung gewinnt
+        - Mehrere unabhängige Starts -> beste Lösung gewinnt
 
     Args:
         teams: Liste von Team-Dicts (mannschaft, verein, region, lat, lon, adresse)
@@ -313,9 +313,9 @@ def vergebe_schluesselzahlen(
 
     # Verfügbare SZ: für ungerade Staffeln ist SZ 1 = spielfrei
     if n % 2 != 0:
-        available_sz = list(range(2, n + 2))  # z.B. 5 Teams → SZ 2-6
+        available_sz = list(range(2, n + 2))  # z.B. 5 Teams -> SZ 2-6
     else:
-        available_sz = list(range(1, n + 1))  # z.B. 8 Teams → SZ 1-8
+        available_sz = list(range(1, n + 1))  # z.B. 8 Teams -> SZ 1-8
 
     n_perms = 1
     for i in range(1, n + 1):
