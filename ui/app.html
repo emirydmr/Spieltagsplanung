@@ -41,7 +41,11 @@
             </button>
             <button class="tab-btn" data-tab="spieltagsplanung">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                Spieltagsplanung
+                Spielplan HR
+            </button>
+            <button class="tab-btn" data-tab="spieltagsplanung-rr">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                Spielplan RR
             </button>
         </div>
 
@@ -166,9 +170,9 @@
 
             <!-- Before generation -->
             <section id="sp-start">
-                <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem;">Spieltagsplanung</h2>
+                <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem;">Spieltagsplanung – Hinrunde</h2>
                 <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
-                    Generiere Spielpläne für alle Staffeln basierend auf der aktuellen Einteilung.
+                    Generiere Spielpläne für alle Staffeln basierend auf der Hinrunde-Einteilung.
                 </p>
 
                 <div class="card" style="margin-bottom: 1.5rem;">
@@ -183,6 +187,26 @@
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                             Spielpläne generieren
                         </button>
+                    </div>
+                </div>
+
+                <!-- Sperrtage (optional) -->
+                <div class="card" style="margin-bottom: 1.5rem;">
+                    <div class="card-header" style="cursor: pointer;" onclick="this.parentElement.classList.toggle('open')">
+                        <h3 style="font-size: 0.95rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="16" y2="14" stroke="var(--danger)"/></svg>
+                            Sperrtage <span style="font-weight: 400; color: var(--text-muted); font-size: 0.82rem;">(optional)</span>
+                        </h3>
+                    </div>
+                    <div class="card-body sperrtage-body" style="display: none; padding: 1rem;">
+                        <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.75rem;">
+                            Termine die komplett gesperrt werden sollen (z.B. Feiertage, Hallenbelegung). Spiele an diesen Tagen werden nicht eingeplant.
+                        </p>
+                        <div id="sperrtageList" class="sperrtage-list"></div>
+                        <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem;">
+                            <input type="date" id="sperrtageInput" class="sperrtage-date-input">
+                            <button class="btn btn-sm btn-secondary" id="btnAddSperrtag">+ Sperrtag hinzufügen</button>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -214,6 +238,80 @@
                 </div>
 
                 <div id="spielplanContainer"></div>
+            </section>
+        </div>
+
+        <!-- ═══ Tab: Spieltagsplanung Rückrunde ══════════════ -->
+        <div class="tab-panel" id="tab-spieltagsplanung-rr">
+
+            <!-- Before generation -->
+            <section id="sprr-start">
+                <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem;">Spieltagsplanung – Rückrunde</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+                    Generiere Spielpläne basierend auf der Rückrunde-Einteilung aus dem Staffel-Builder.
+                </p>
+
+                <div class="card" style="margin-bottom: 1.5rem;">
+                    <div class="card-body" style="text-align: center; padding: 2rem;">
+                        <div style="margin-bottom: 1rem;">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-light)" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                        </div>
+                        <p id="sprrStatusText" style="color: var(--text-muted); margin-bottom: 1rem;">
+                            Bitte zuerst eine Rückrunde-Einteilung im Staffel-Builder exportieren.
+                        </p>
+                        <button class="btn btn-primary btn-lg" id="btnGenSpielplanRr" disabled style="min-width: 260px;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                            Spielpläne generieren
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sperrtage RR (optional) -->
+                <div class="card" style="margin-bottom: 1.5rem;">
+                    <div class="card-header" style="cursor: pointer;" onclick="this.parentElement.classList.toggle('open')">
+                        <h3 style="font-size: 0.95rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="16" y2="14" stroke="var(--danger)"/></svg>
+                            Sperrtage <span style="font-weight: 400; color: var(--text-muted); font-size: 0.82rem;">(optional)</span>
+                        </h3>
+                    </div>
+                    <div class="card-body sperrtage-body" style="display: none; padding: 1rem;">
+                        <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.75rem;">
+                            Termine die komplett gesperrt werden sollen. Spiele an diesen Tagen werden nicht eingeplant.
+                        </p>
+                        <div id="sperrtageRrList" class="sperrtage-list"></div>
+                        <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem;">
+                            <input type="date" id="sperrtageRrInput" class="sperrtage-date-input">
+                            <button class="btn btn-sm btn-secondary" id="btnAddSprrSperrtag">+ Sperrtag hinzufügen</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Results -->
+            <section id="sprr-results" style="display: none;">
+                <div style="margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center;">
+                    <button class="btn btn-secondary" id="btnSprrBack">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                        Zurück
+                    </button>
+                    <h2 style="font-size: 1.3rem;">Spielpläne – Rückrunde</h2>
+                    <button class="btn btn-primary" id="btnSprrExport">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Excel Export
+                    </button>
+                </div>
+
+                <div class="stats-row" id="sprrStatsRow"></div>
+
+                <div style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+                    <select id="sprrFilterAk" class="filter-select">
+                        <option value="">Alle Altersklassen</option>
+                    </select>
+                    <button class="btn btn-sm btn-secondary" id="btnSprrExpandAll">Alle aufklappen</button>
+                    <button class="btn btn-sm btn-secondary" id="btnSprrCollapseAll">Alle zuklappen</button>
+                </div>
+
+                <div id="spielplanRrContainer"></div>
             </section>
         </div>
 

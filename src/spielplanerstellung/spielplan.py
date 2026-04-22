@@ -69,6 +69,7 @@ def generiere_spielplan(
     staffel_idx: int,
     region: str = "alle",
     wuensche: dict[str, list[Wunsch]] | None = None,
+    sperrtage: set["date"] | None = None,
 ) -> StaffelSpielplan:
     """Generiert einen Spielplan für eine einzelne Staffel.
 
@@ -79,6 +80,7 @@ def generiere_spielplan(
         staffel_idx: Staffel-Index (0-basiert)
         region: "alle", "Unterland" oder "Hohenlohe"
         wuensche: Wünsche pro Mannschaft
+        sperrtage: Optionale Menge von Daten die komplett gesperrt sind
 
     Returns:
         StaffelSpielplan
@@ -92,6 +94,14 @@ def generiere_spielplan(
 
     # 2. Terminplan finden (VOR SZ-Vergabe, damit Daten für Wünsche-Prüfung da sind)
     terminplan = find_terminplan(altersklasse, n_spieltage, region)
+
+    # Sperrtage aus Terminplan entfernen
+    if terminplan and sperrtage:
+        filtered = {nr: dt for nr, dt in terminplan.spieltage.items() if dt not in sperrtage}
+        removed = len(terminplan.spieltage) - len(filtered)
+        if removed > 0:
+            terminplan.spieltage = filtered
+            print(f"[Sperrtage] {altersklasse}: {removed} Termine gesperrt")
 
     # Spieltag-Daten für Wünsche-Scoring extrahieren
     spieltag_dates: dict[int, "date"] = {}
@@ -214,6 +224,7 @@ def _find_adresse(sz_zuordnungen: list[SZZuordnung], mannschaft: str) -> str:
 def generiere_alle_spielplaene(
     einteilung_data: dict,
     wuensche: dict[str, list[Wunsch]] | None = None,
+    sperrtage: set["date"] | None = None,
 ) -> list[StaffelSpielplan]:
     """Generiert Spielpläne für alle Staffeln aus der Einteilung.
 
@@ -227,6 +238,7 @@ def generiere_alle_spielplaene(
     Args:
         einteilung_data: Das JSON-Result von /api/einteilung
         wuensche: Wünsche pro Mannschaftsname
+        sperrtage: Optionale Menge von Daten die komplett gesperrt sind
 
     Returns:
         Liste von StaffelSpielplan
@@ -253,6 +265,7 @@ def generiere_alle_spielplaene(
                 staffel_idx=si,
                 region=region,
                 wuensche=wuensche,
+                sperrtage=sperrtage,
             )
             alle_plaene.append(plan)
 

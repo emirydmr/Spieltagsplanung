@@ -21,6 +21,7 @@
     let mapLayers = [];
     let highlightedStaffelId = null;
     let draggedTeamId = null;
+    let regiostaffeln = [];     // Regionenstaffeln from Hinrunde
 
     const STAFFEL_COLORS = [
         '#c41230', '#2563eb', '#059669', '#d97706', '#7c3aed',
@@ -133,9 +134,28 @@
         nextStaffelId = 1;
         staffelnContainer.innerHTML = '';
         highlightedStaffelId = null;
+        // Auto-populate Regionenstaffeln from Hinrunde
+        populateRegiostaffeln();
         updatePool();
         renderMap();
     });
+
+    function populateRegiostaffeln() {
+        if (!regiostaffeln || regiostaffeln.length === 0) return;
+        const akRegios = regiostaffeln.filter(r => r.altersklasse === currentAk);
+        for (const regio of akRegios) {
+            const s = addStaffel(regio.staffel_name, 'Regionenstaffel', false, true);
+            // Match teams by name
+            for (const teamName of regio.teams) {
+                const team = allTeams.find(t =>
+                    t.altersklasse === currentAk && t.mannschaft === teamName);
+                if (team && !s.teams.find(x => x._id === team._id)) {
+                    s.teams.push(team);
+                }
+            }
+            renderStaffelTeams(s.id);
+        }
+    }
 
     // ─── Pool search ─────────────────────────────────────────
     poolSearch.addEventListener('input', () => renderPool());
@@ -230,8 +250,9 @@
         poolList.classList.remove('drop-hover');
         const teamId = e.dataTransfer.getData('text/plain');
         if (!teamId) return;
-        // Remove from any staffel
+        // Remove from any staffel (but not locked ones)
         for (const s of staffeln) {
+            if (s.locked) continue;
             const idx = s.teams.findIndex(t => t._id === teamId);
             if (idx >= 0) {
                 s.teams.splice(idx, 1);
@@ -246,13 +267,14 @@
     // ─── Staffel Management ──────────────────────────────────
     btnAddStaffel.addEventListener('click', () => addStaffel());
 
-    function addStaffel(name, typ, doppelrunde) {
+    function addStaffel(name, typ, doppelrunde, locked) {
         const id = nextStaffelId++;
         const s = {
             id,
             name: name || `Staffel ${id}`,
             typ: typ || 'Kreisstaffel',
             doppelrunde: doppelrunde || false,
+            locked: locked || false,
             teams: [],
         };
         staffeln.push(s);
@@ -278,9 +300,19 @@
 
         clone.querySelector('.staffel-delete-btn').addEventListener('click', () => deleteStaffel(id));
 
+        // Locked staffeln: disable editing
+        if (s.locked) {
+            root.classList.add('staffel-locked');
+            nameInput.disabled = true;
+            typSelect.disabled = true;
+            drCheck.disabled = true;
+            clone.querySelector('.staffel-delete-btn').style.display = 'none';
+        }
+
         // Drop zone
         const dropZone = clone.querySelector('.builder-drop-zone');
         dropZone.addEventListener('dragover', e => {
+            if (s.locked) return; // No drops into locked staffeln
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
             dropZone.classList.add('drop-hover');
@@ -289,13 +321,15 @@
             if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('drop-hover');
         });
         dropZone.addEventListener('drop', e => {
+            if (s.locked) return; // No drops into locked staffeln
             e.preventDefault();
             dropZone.classList.remove('drop-hover');
             const teamId = e.dataTransfer.getData('text/plain');
             if (!teamId) return;
 
-            // Remove from previous staffel
+            // Remove from previous staffel (but not from locked ones)
             for (const other of staffeln) {
+                if (other.locked) continue;
                 const idx = other.teams.findIndex(t => t._id === teamId);
                 if (idx >= 0) {
                     other.teams.splice(idx, 1);
@@ -329,7 +363,7 @@
 
     function deleteStaffel(id) {
         const idx = staffeln.findIndex(s => s.id === id);
-        if (idx < 0) return;
+        if (idx < 0 || staffeln[idx].locked) return;
         staffeln.splice(idx, 1);
         const el = document.querySelector(`[data-staffel-id="${id}"]`);
         if (el) el.remove();
@@ -352,18 +386,20 @@
         for (const t of s.teams) {
             const el = document.createElement('div');
             el.className = 'builder-team-item in-staffel';
-            el.draggable = true;
+            el.draggable = !s.locked;
             el.dataset.teamId = t._id;
             el.innerHTML =
                 `<span class="team-name">${esc(t.mannschaft)}</span>` +
                 `<span class="team-meta">${esc(t.region || '?')}` +
                 `${t.quotient_hinrunde != null ? ' · Q ' + t.quotient_hinrunde.toFixed(2) : ''}` +
                 `${t.lat != null ? ' · 📍' : ''}</span>` +
-                `<button class="team-remove-btn" title="Zurück in Pool">✕</button>`;
-            el.addEventListener('dragstart', onDragStart);
-            el.addEventListener('dragend', onDragEnd);
+                (s.locked ? '' : `<button class="team-remove-btn" title="Zurück in Pool">✕</button>`);
+            if (!s.locked) {
+                el.addEventListener('dragstart', onDragStart);
+                el.addEventListener('dragend', onDragEnd);
+            }
             el.addEventListener('click', e => {
-                if (e.target.closest('.team-remove-btn')) {
+                if (!s.locked && e.target.closest('.team-remove-btn')) {
                     // Remove from staffel
                     const idx = s.teams.findIndex(x => x._id === t._id);
                     if (idx >= 0) s.teams.splice(idx, 1);
@@ -564,6 +600,10 @@
                     doppelrunde: s.doppelrunde,
                     teams: s.teams.map((t, i) => ({
                         mannschaft: t.mannschaft,
+                        verein: t.verein || '',
+                        adresse: t.adresse || '',
+                        lat: t.lat || null,
+                        lon: t.lon || null,
                         rang_hinrunde: t.rang_hinrunde || i + 1,
                         punkte_hinrunde: t.punkte_hinrunde || null,
                         quotient_hinrunde: t.quotient_hinrunde || null,
@@ -610,6 +650,7 @@
             if (from === 'meldeliste') {
                 // Data comes from /api/builder/teams — already in the right format
                 allTeams = data.teams || [];
+                regiostaffeln = data.regiostaffeln || [];
             } else {
                 // Data from rueckrunde tab — convert gruppen to flat team list
                 const gruppen = data.gruppen || [];
@@ -687,11 +728,16 @@
             uploadSection.style.display = 'none';
             mainSection.style.display = 'block';
 
+            // Auto-populate Regionenstaffeln from Hinrunde
+            populateRegiostaffeln();
+
             updatePool();
             initMap();
             renderMap();
 
-            showToast(`${allTeams.length} Teams geladen`, 'success');
+            const nRegio = staffeln.filter(s => s.locked).length;
+            const regioMsg = nRegio > 0 ? ` (${nRegio} Regionenstaffeln übernommen)` : '';
+            showToast(`${allTeams.length} Teams geladen${regioMsg}`, 'success');
         } catch (err) {
             console.error('Fehler beim Laden:', err);
         }

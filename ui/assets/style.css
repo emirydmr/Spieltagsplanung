@@ -757,7 +757,7 @@ table.teams-table {
 
 .spiel-list-header {
     display: grid;
-    grid-template-columns: 70px 1fr 160px 60px;
+    grid-template-columns: 70px 80px 1fr 160px 60px;
     gap: 0.5rem;
     padding: 0.4rem 1rem;
     font-size: 0.72rem;
@@ -776,7 +776,7 @@ table.teams-table {
 
 .spiel-row {
     display: grid;
-    grid-template-columns: 70px 1fr 160px 60px;
+    grid-template-columns: 70px 80px 1fr 160px 60px;
     gap: 0.5rem;
     padding: 0.5rem 1rem;
     align-items: center;
@@ -799,6 +799,13 @@ table.teams-table {
     color: var(--accent);
     font-size: 0.85rem;
     font-variant-numeric: tabular-nums;
+}
+
+.spiel-datum-col {
+    font-size: 0.78rem;
+    color: var(--warning, #d97706);
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 .spiel-paarung {
@@ -844,6 +851,62 @@ table.teams-table {
     color: var(--success);
 }
 
+/* ── Sperrtage ─────────────────────────────── */
+
+.card .sperrtage-body { display: none; }
+.card.open .sperrtage-body { display: block !important; }
+.card .card-header h3::after {
+    content: '▸';
+    margin-left: auto;
+    font-size: 0.9rem;
+    color: var(--text-light);
+    transition: transform 0.2s;
+}
+.card.open .card-header h3::after {
+    transform: rotate(90deg);
+}
+
+.sperrtage-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+
+.sperrtag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: rgba(220, 38, 38, 0.08);
+    color: var(--danger, #dc2626);
+    border: 1px solid rgba(220, 38, 38, 0.2);
+    border-radius: 999px;
+    padding: 0.25rem 0.6rem 0.25rem 0.75rem;
+    font-size: 0.82rem;
+    font-weight: 500;
+}
+
+.sperrtag-chip button {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.1rem;
+    opacity: 0.6;
+}
+.sperrtag-chip button:hover { opacity: 1; }
+
+.sperrtage-date-input {
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 0.85rem;
+    background: var(--bg-card);
+    color: var(--text);
+}
+
 .spielfrei-hint {
     padding: 0.4rem 1rem;
     font-size: 0.8rem;
@@ -856,7 +919,7 @@ table.teams-table {
 @media (max-width: 768px) {
     .spiel-list-header,
     .spiel-row {
-        grid-template-columns: 55px 1fr 100px 50px;
+        grid-template-columns: 55px 70px 1fr 100px 50px;
     }
     .spieltage-list {
         gap: 0.75rem;
@@ -1124,7 +1187,7 @@ table.teams-table {
 @media (max-width: 768px) {
     .spiel-list-header,
     .spiel-row {
-        grid-template-columns: 55px 1fr 100px 50px;
+        grid-template-columns: 55px 70px 1fr 100px 50px;
     }
 }
 
@@ -1309,6 +1372,19 @@ table.teams-table {
 
 .builder-staffel.highlighted {
     box-shadow: 0 0 0 2px var(--accent), var(--shadow-md);
+}
+
+.builder-staffel.staffel-locked {
+    border: 1px solid rgba(5, 150, 105, 0.3);
+    background: rgba(5, 150, 105, 0.03);
+}
+
+.builder-staffel.staffel-locked .builder-staffel-header::after {
+    content: '🔒 Hinrunde';
+    font-size: 0.72rem;
+    color: var(--success, #059669);
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 .staffel-color-dot {

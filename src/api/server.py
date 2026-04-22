@@ -436,6 +436,13 @@ async def api_export_rueckrunde(request: Request):
 
     wb = _build_rueckrunde_workbook(gruppen, saison)
 
+    # Einteilung als JSON sichern (für Spielplan-Generierung Rückrunde)
+    rr_einteilung = {"gruppen": gruppen, "saison": saison, "total_teams": sum(g.get("n_teams", 0) for g in gruppen)}
+    rr_path = ROOT / "config" / "rueckrunde_einteilung.json"
+    with open(rr_path, "w", encoding="utf-8") as f:
+        json.dump(rr_einteilung, f, ensure_ascii=False, indent=1)
+    print(f"[RR] Einteilung gespeichert: {rr_path.name} ({rr_einteilung['total_teams']} Teams)")
+
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     wb.save(tmp.name)
     tmp.close()
@@ -445,6 +452,17 @@ async def api_export_rueckrunde(request: Request):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=f"Einteilung_Rueckrunde_{saison.replace('/', '_')}.xlsx",
     )
+
+
+@app.get("/api/rueckrunde/einteilung")
+async def api_get_rueckrunde_einteilung():
+    """Gibt die gespeicherte Rückrunde-Einteilung zurück (falls vorhanden)."""
+    rr_path = ROOT / "config" / "rueckrunde_einteilung.json"
+    if not rr_path.exists():
+        raise HTTPException(404, "Keine Rückrunde-Einteilung vorhanden")
+    with open(rr_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return JSONResponse(data)
 
 
 def _build_rueckrunde_workbook(gruppen: list[dict], saison: str) -> Workbook:
@@ -690,8 +708,18 @@ async def api_spielplan(request: Request):
     data = await request.json()
     einteilung = data.get("einteilung")
     saison = data.get("saison", "")
+    sperrtage_raw = data.get("sperrtage", [])
     if not einteilung or not einteilung.get("gruppen"):
         raise HTTPException(400, "Keine Einteilung vorhanden")
+
+    # Sperrtage parsen (ISO-Strings → date-Objekte)
+    from datetime import date as _date
+    sperrtage = set()
+    for s in (sperrtage_raw or []):
+        try:
+            sperrtage.add(_date.fromisoformat(s))
+        except (ValueError, TypeError):
+            pass
 
     try:
         # Wünsche regelbasiert parsen (schnell, kein LLM)
@@ -699,6 +727,7 @@ async def api_spielplan(request: Request):
 
         plaene = generiere_alle_spielplaene(
             einteilung, wuensche=wuensche if wuensche else None,
+            sperrtage=sperrtage if sperrtage else None,
         )
         result = {
             "spielplaene": [spielplan_to_dict(p) for p in plaene],
@@ -923,9 +952,31 @@ def _recalculate_konflikte(spielplaene: list[dict]) -> None:
 
 @app.post("/api/spielplan/export")
 async def api_spielplan_export(request: Request):
-    """Generiert eine Excel-Datei aus den Spielplänen."""
+    """Generiert eine Excel-Datei aus den Spielplänen.
+
+    Akzeptiert entweder:
+      - {"spielplaene": [...]} direkt
+      - {"from_log": "spielplan_20260420_205718.json"} zum Laden aus Log
+      - {} (leer) → lädt automatisch den neuesten Log
+    """
     data = await request.json()
-    spielplaene = data.get("spielplaene", [])
+    spielplaene = data.get("spielplaene")
+
+    if not spielplaene:
+        # Versuche aus Log zu laden
+        log_file = data.get("from_log")
+        if log_file:
+            fp = SPIELPLAN_DIR / log_file
+        else:
+            # Neuesten Log finden
+            logs = sorted(SPIELPLAN_DIR.glob("spielplan_*.json"))
+            fp = logs[-1] if logs else None
+
+        if fp and fp.exists():
+            with open(fp, "r", encoding="utf-8") as f:
+                log_data = json.load(f)
+            spielplaene = log_data.get("spielplaene", [])
+
     if not spielplaene:
         raise HTTPException(400, "Keine Spielpläne vorhanden")
 
@@ -973,6 +1024,11 @@ async def api_spielplan_export(request: Request):
         sheet_name = f"{p['altersklasse']} {p['staffel_name']}"[:31]
         ws = wb.create_sheet(title=sheet_name)
 
+        # SZ-Lookup: Mannschaftsname → SZ-Nummer
+        sz_lookup = {}
+        for z in p.get("sz_zuordnungen", []):
+            sz_lookup[z["mannschaft"]] = z["sz"]
+
         row = 1
         for st in p["spieltage"]:
             # Spieltag header
@@ -989,11 +1045,11 @@ async def api_spielplan_export(request: Request):
             label = f"Spieltag {st['nummer']}  —  {datum_str}"
             cell = ws.cell(row=row, column=1, value=label)
             cell.font = spieltag_font
-            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
             row += 1
 
             # Table headers
-            sp_headers = ["Zeit", "Heim", "Gast", "Spielort", "Datum"]
+            sp_headers = ["Zeit", "SZ", "Heim", "SZ", "Gast", "Spielort", "Datum"]
             for ci, h in enumerate(sp_headers, 1):
                 cell = ws.cell(row=row, column=ci, value=h)
                 cell.font = header_font
@@ -1011,12 +1067,16 @@ async def api_spielplan_export(request: Request):
                     except ValueError:
                         datum_spiel = spiel["datum"]
 
+                heim = spiel.get("heim", "")
+                gast = spiel.get("gast", "")
                 ws.cell(row=row, column=1, value=spiel.get("anstosszeit", "")).alignment = center
-                ws.cell(row=row, column=2, value=spiel.get("heim", ""))
-                ws.cell(row=row, column=3, value=spiel.get("gast", ""))
-                ws.cell(row=row, column=4, value=spiel.get("spielfeld", ""))
-                ws.cell(row=row, column=5, value=datum_spiel).alignment = center
-                for ci in range(1, 6):
+                ws.cell(row=row, column=2, value=sz_lookup.get(heim, "")).alignment = center
+                ws.cell(row=row, column=3, value=heim)
+                ws.cell(row=row, column=4, value=sz_lookup.get(gast, "")).alignment = center
+                ws.cell(row=row, column=5, value=gast)
+                ws.cell(row=row, column=6, value=spiel.get("spielfeld", ""))
+                ws.cell(row=row, column=7, value=datum_spiel).alignment = center
+                for ci in range(1, 8):
                     ws.cell(row=row, column=ci).border = thin_border
                 row += 1
 
@@ -1030,10 +1090,12 @@ async def api_spielplan_export(request: Request):
 
         # Column widths
         ws.column_dimensions["A"].width = 10
-        ws.column_dimensions["B"].width = 28
+        ws.column_dimensions["B"].width = 6
         ws.column_dimensions["C"].width = 28
-        ws.column_dimensions["D"].width = 36
-        ws.column_dimensions["E"].width = 14
+        ws.column_dimensions["D"].width = 6
+        ws.column_dimensions["E"].width = 28
+        ws.column_dimensions["F"].width = 36
+        ws.column_dimensions["G"].width = 14
 
     # Save to temp file
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")

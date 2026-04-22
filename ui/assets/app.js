@@ -160,6 +160,24 @@
             }
 
             const data = await resp.json();
+            // Pass Hinrunde Regionenstaffeln to builder (if available)
+            if (resultData && resultData.gruppen) {
+                const regioStaffeln = [];
+                for (const g of resultData.gruppen) {
+                    if (g.spielklasse === 'Regionenstaffel' || g.topf === 'fix') {
+                        for (const s of g.staffeln || []) {
+                            regioStaffeln.push({
+                                altersklasse: g.altersklasse,
+                                staffel_name: s.staffel_name || `${g.altersklasse} Regionenstaffel`,
+                                teams: (s.teams || []).map(t => t.mannschaft),
+                            });
+                        }
+                    }
+                }
+                if (regioStaffeln.length > 0) {
+                    data.regiostaffeln = regioStaffeln;
+                }
+            }
             sessionStorage.setItem('builderTeams', JSON.stringify(data));
             window.location.href = '/builder?from=meldeliste';
         } catch (err) {
@@ -716,6 +734,40 @@
     let spielplanData = null;
     let currentEdit = null; // {staffel_idx, spieltag_nr, spiel_idx, spiel}
 
+    // ─── Sperrtage Management (HR) ──────────────────────────
+    const sperrtageHr = [];
+    const sperrtageList = $('#sperrtageList');
+    const sperrtageInput = $('#sperrtageInput');
+    const btnAddSperrtag = $('#btnAddSperrtag');
+
+    function renderSperrtage(list, container) {
+        container.innerHTML = list.map((d, i) => {
+            const dt = new Date(d);
+            const label = dt.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+            return `<span class="sperrtag-chip">${label}<button onclick="removeSperrtag('hr', ${i})">&times;</button></span>`;
+        }).join('');
+    }
+
+    btnAddSperrtag.addEventListener('click', () => {
+        const val = sperrtageInput.value;
+        if (!val) return;
+        if (sperrtageHr.includes(val)) { sperrtageInput.value = ''; return; }
+        sperrtageHr.push(val);
+        sperrtageHr.sort();
+        renderSperrtage(sperrtageHr, sperrtageList);
+        sperrtageInput.value = '';
+    });
+
+    window.removeSperrtag = function(which, idx) {
+        if (which === 'hr') {
+            sperrtageHr.splice(idx, 1);
+            renderSperrtage(sperrtageHr, sperrtageList);
+        } else {
+            sperrtageRr.splice(idx, 1);
+            renderSperrtage(sperrtageRr, sperrtageRrList);
+        }
+    };
+
     // Enable generate button when einteilung exists
     function updateSpielplanStatus() {
         const data = resultData;
@@ -729,15 +781,73 @@
         }
     }
 
+    // ─── Spieltagsplanung Rückrunde ──────────────────────────
+
+    const sprrStart = $('#sprr-start');
+    const sprrResults = $('#sprr-results');
+    const sprrStatusText = $('#sprrStatusText');
+    const btnGenSpielplanRr = $('#btnGenSpielplanRr');
+    const sprrStatsRow = $('#sprrStatsRow');
+    const sprrFilterAk = $('#sprrFilterAk');
+    const spielplanRrContainer = $('#spielplanRrContainer');
+    const btnSprrBack = $('#btnSprrBack');
+    const btnSprrExpandAll = $('#btnSprrExpandAll');
+    const btnSprrCollapseAll = $('#btnSprrCollapseAll');
+    const btnSprrExport = $('#btnSprrExport');
+
+    let spielplanRrData = null;
+    let rrEinteilung = null;
+
+    // ─── Sperrtage Management (RR) ──────────────────────────
+    const sperrtageRr = [];
+    const sperrtageRrList = $('#sperrtageRrList');
+    const sperrtageRrInput = $('#sperrtageRrInput');
+    const btnAddSprrSperrtag = $('#btnAddSprrSperrtag');
+
+    btnAddSprrSperrtag.addEventListener('click', () => {
+        const val = sperrtageRrInput.value;
+        if (!val) return;
+        if (sperrtageRr.includes(val)) { sperrtageRrInput.value = ''; return; }
+        sperrtageRr.push(val);
+        sperrtageRr.sort();
+        renderSperrtage(sperrtageRr, sperrtageRrList);
+        sperrtageRrInput.value = '';
+    });
+
+    // Load RR einteilung from server (saved when Builder exports)
+    async function loadRrEinteilung() {
+        try {
+            const resp = await fetch('/api/rueckrunde/einteilung');
+            if (resp.ok) {
+                rrEinteilung = await resp.json();
+            }
+        } catch (_) { /* ignore */ }
+    }
+
+    function updateSpielplanRrStatus() {
+        if (rrEinteilung && rrEinteilung.gruppen && rrEinteilung.gruppen.length > 0) {
+            const n = rrEinteilung.gruppen.reduce((s, g) => s + g.staffeln.length, 0);
+            sprrStatusText.textContent = `Rückrunde-Einteilung vorhanden: ${rrEinteilung.total_teams} Teams in ${n} Staffeln.`;
+            btnGenSpielplanRr.disabled = false;
+        } else {
+            sprrStatusText.textContent = 'Bitte zuerst eine Rückrunde-Einteilung im Staffel-Builder exportieren.';
+            btnGenSpielplanRr.disabled = true;
+        }
+    }
+
     // Hook into tab switching to refresh status + invalidate maps
     document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             if (btn.dataset.tab === 'spieltagsplanung') updateSpielplanStatus();
+            if (btn.dataset.tab === 'spieltagsplanung-rr') {
+                await loadRrEinteilung();
+                updateSpielplanRrStatus();
+            }
             if (btn.dataset.tab === 'staffeleinteilung' && map) setTimeout(() => map.invalidateSize(), 100);
         });
     });
 
-    // Generate Spielplan
+    // Generate Spielplan (Hinrunde)
     btnGenSpielplan.addEventListener('click', async () => {
         const data = resultData;
         if (!data) return;
@@ -747,7 +857,6 @@
         if (loadingText) loadingText.textContent = 'Spielpläne werden generiert...';
 
         try {
-            // Saison ableiten: Aug-Dez → aktuelles Jahr, Jan-Jul → Vorjahr
             const now = new Date();
             const startYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
             const saison = `${startYear}/${(startYear + 1) % 100}`;
@@ -755,7 +864,7 @@
             const resp = await fetch('/api/spielplan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ einteilung: data, saison }),
+                body: JSON.stringify({ einteilung: data, saison, sperrtage: sperrtageHr.length > 0 ? sperrtageHr : undefined }),
             });
 
             if (!resp.ok) {
@@ -783,7 +892,11 @@
     });
 
     // Render Spielplan results
-    function renderSpielplanResults(data) {
+    function renderSpielplanResults(data, targetStats, targetFilter, targetContainer) {
+        targetStats = targetStats || spStatsRow;
+        targetFilter = targetFilter || spFilterAk;
+        targetContainer = targetContainer || spielplanContainer;
+
         const plaene = data.spielplaene;
 
         // Stats
@@ -798,7 +911,7 @@
         const wuenscheParsed = data.wuensche_parsed || 0;
         const wunschVerletzungen = plaene.reduce((s, p) => s + (p.score ? p.score.wunsch_verletzungen : 0), 0);
 
-        spStatsRow.innerHTML = `
+        targetStats.innerHTML = `
             <div class="stat-card">
                 <div class="stat-value">${plaene.length}</div>
                 <div class="stat-label">Spielpläne</div>
@@ -831,18 +944,20 @@
 
         // AK filter
         const altersklassen = [...new Set(plaene.map(p => p.altersklasse))].sort();
-        spFilterAk.innerHTML = '<option value="">Alle Altersklassen</option>' +
+        targetFilter.innerHTML = '<option value="">Alle Altersklassen</option>' +
             altersklassen.map(ak => `<option value="${ak}">${ak}</option>`).join('');
 
-        renderSpielplaene(plaene);
+        renderSpielplaene(plaene, targetFilter, targetContainer);
     }
 
-    function renderSpielplaene(plaene) {
-        const akFilter = spFilterAk.value;
+    function renderSpielplaene(plaene, filterEl, containerEl) {
+        filterEl = filterEl || spFilterAk;
+        containerEl = containerEl || spielplanContainer;
+        const akFilter = filterEl.value;
         const filtered = akFilter ? plaene.filter(p => p.altersklasse === akFilter) : plaene;
 
         if (filtered.length === 0) {
-            spielplanContainer.innerHTML = `
+            containerEl.innerHTML = `
                 <div class="empty-state">
                     <p>Keine Spielpläne gefunden.</p>
                 </div>
@@ -850,7 +965,7 @@
             return;
         }
 
-        spielplanContainer.innerHTML = filtered.map((plan, idx) => {
+        containerEl.innerHTML = filtered.map((plan, idx) => {
             const drBadge = plan.doppelrunde
                 ? '<span class="gruppe-badge badge-gold">Doppelrunde</span>' : '';
 
@@ -891,6 +1006,12 @@
                 const spieleRows = st.spiele.map((s, si) => {
                     const sZeit = s.anstosszeit || '–';
                     const ort = s.spielfeld ? s.spielfeld.split(', ').pop() : '–';
+                    // Show actual date if it differs from Spieltag date
+                    let abwDatum = '';
+                    if (s.datum && s.datum !== st.datum) {
+                        const gd = new Date(s.datum);
+                        abwDatum = gd.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+                    }
                     const gameKey = `${s.heim} vs ${s.gast}`;
                     const gameKeyRev = `${s.gast} vs ${s.heim}`;
                     // Check if this game has a platz conflict (match by spiel field)
@@ -924,6 +1045,7 @@
                     return `
                         <div class="spiel-row${conflictClass}" data-staffel="${plan.staffel_idx}" data-st="${st.nummer}" data-si="${si}">
                             <div class="spiel-zeit-col">${sZeit}</div>
+                            ${abwDatum ? `<div class="spiel-datum-col" title="Abweichend vom Spieltag-Termin">${abwDatum}</div>` : `<div class="spiel-datum-col"></div>`}
                             <div class="spiel-paarung">
                                 <span class="spiel-heim">${s.heim}</span>
                                 <span class="spiel-vs">–</span>
@@ -949,6 +1071,7 @@
                         </div>
                         <div class="spiel-list-header">
                             <div class="spiel-zeit-col">Zeit</div>
+                            <div class="spiel-datum-col">Datum</div>
                             <div class="spiel-paarung">Paarung</div>
                             <div class="spiel-ort-col">Spielort</div>
                             <div></div>
@@ -999,7 +1122,7 @@
     }
 
     spFilterAk.addEventListener('change', () => {
-        if (spielplanData) renderSpielplaene(spielplanData.spielplaene);
+        if (spielplanData) renderSpielplaene(spielplanData.spielplaene, spFilterAk, spielplanContainer);
     });
 
     btnSpExpandAll.addEventListener('click', () => {
@@ -1008,6 +1131,84 @@
 
     btnSpCollapseAll.addEventListener('click', () => {
         document.querySelectorAll('#spielplanContainer .gruppe').forEach(g => g.classList.remove('open'));
+    });
+
+    // ─── Rückrunde Spielplan: Generate / Back / Filter / Expand ──
+
+    btnGenSpielplanRr.addEventListener('click', async () => {
+        if (!rrEinteilung) return;
+
+        loading.style.display = 'flex';
+        const loadingText = loading.querySelector('.loading-text');
+        if (loadingText) loadingText.textContent = 'Rückrunde-Spielpläne werden generiert...';
+
+        try {
+            const saison = rrEinteilung.saison || '2025/26';
+            const resp = await fetch('/api/spielplan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ einteilung: rrEinteilung, saison, sperrtage: sperrtageRr.length > 0 ? sperrtageRr : undefined }),
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.detail || 'Server-Fehler');
+            }
+
+            spielplanRrData = await resp.json();
+            renderSpielplanResults(spielplanRrData, sprrStatsRow, sprrFilterAk, spielplanRrContainer);
+            sprrStart.style.display = 'none';
+            sprrResults.style.display = 'block';
+            showToast(`Rückrunde: ${spielplanRrData.total_staffeln} Spielpläne generiert!`, 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        } finally {
+            loading.style.display = 'none';
+            if (loadingText) loadingText.textContent = 'Einteilung wird berechnet...';
+        }
+    });
+
+    btnSprrBack.addEventListener('click', () => {
+        sprrResults.style.display = 'none';
+        sprrStart.style.display = 'block';
+    });
+
+    sprrFilterAk.addEventListener('change', () => {
+        if (spielplanRrData) renderSpielplaene(spielplanRrData.spielplaene, sprrFilterAk, spielplanRrContainer);
+    });
+
+    btnSprrExpandAll.addEventListener('click', () => {
+        document.querySelectorAll('#spielplanRrContainer .gruppe').forEach(g => g.classList.add('open'));
+    });
+
+    btnSprrCollapseAll.addEventListener('click', () => {
+        document.querySelectorAll('#spielplanRrContainer .gruppe').forEach(g => g.classList.remove('open'));
+    });
+
+    btnSprrExport.addEventListener('click', async () => {
+        try {
+            btnSprrExport.disabled = true;
+            btnSprrExport.textContent = 'Exportiere...';
+            const resp = await fetch('/api/spielplan/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            });
+            if (!resp.ok) throw new Error('Export fehlgeschlagen');
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'Spielplan_Rueckrunde.xlsx';
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Excel exportiert', 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        } finally {
+            btnSprrExport.disabled = false;
+            btnSprrExport.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Excel Export';
+        }
     });
 
     // ─── Edit Modal Logic ─────────────────────────────────────
@@ -1119,13 +1320,16 @@
 
     // ─── Excel Export ─────────────────────────────────────────
     btnSpExport.addEventListener('click', async () => {
-        if (!spielplanData || !spielplanData.spielplaene.length) return;
+        if (!spielplanData) return;
+
+        btnSpExport.disabled = true;
+        btnSpExport.textContent = 'Exportiere...';
 
         try {
             const resp = await fetch('/api/spielplan/export', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ spielplaene: spielplanData.spielplaene }),
+                body: JSON.stringify({}),  // Server lädt letzten Spielplan aus Log
             });
 
             if (!resp.ok) {
@@ -1140,9 +1344,12 @@
             a.download = 'Spielplaene.xlsx';
             a.click();
             URL.revokeObjectURL(url);
-            showToast('Excel exported!', 'success');
+            showToast('Excel exportiert!', 'success');
         } catch (err) {
             showToast(err.message, 'error');
+        } finally {
+            btnSpExport.disabled = false;
+            btnSpExport.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Excel Export';
         }
     });
 
