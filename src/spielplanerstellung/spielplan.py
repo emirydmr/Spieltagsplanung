@@ -524,7 +524,7 @@ def _optimiere_sz_cross_staffel(
         return 0
 
     final = total_conflicts()
-    print(f"[Cross-SZ] {initial} → {final} Kollisionen "
+    print(f"[Cross-SZ] {initial} -> {final} Kollisionen "
           f"({total_swaps} SZ-Swaps in {last_round + 1} Runden)")
 
     # Geänderte Pläne aktualisieren: SZ-Zuordnungen + Spieltage neu aufbauen

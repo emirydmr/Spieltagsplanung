@@ -809,7 +809,7 @@ def _global_wish_optimization(
         # 1. Verletzungen identifizieren
         violation_gids, target_slots = _find_wish_violations(all_games, wuensche)
         if not violation_gids:
-            print(f"[CP-SAT] Wunsch-Opt {iteration+1}: Keine Verletzungen → fertig")
+            print(f"[CP-SAT] Wunsch-Opt {iteration+1}: Keine Verletzungen -> fertig")
             break
 
         games_by_gid = {g.gid: g for g in all_games}
