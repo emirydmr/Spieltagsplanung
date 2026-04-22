@@ -29,6 +29,26 @@ from src.common.distanz import haversine_km
 
 PENALTY = 10_000  # Hard-Constraint-Verletzung
 
+# Globaler Distanz-Cache: (lat1, lon1, lat2, lon2) -> km
+_distanz_cache: dict[tuple[float, float, float, float], float] = {}
+
+
+def init_distanz_cache(mannschaften: list[Mannschaft]) -> None:
+    """Vorberechnung aller paarweisen Distanzen für schnelles Scoring."""
+    global _distanz_cache
+    _distanz_cache.clear()
+    teams = [
+        m for m in mannschaften
+        if m.spielstaette and m.spielstaette.lat is not None
+    ]
+    for i in range(len(teams)):
+        a = teams[i].spielstaette
+        for j in range(i + 1, len(teams)):
+            b = teams[j].spielstaette
+            d = haversine_km(a.lat, a.lon, b.lat, b.lon)
+            _distanz_cache[(a.lat, a.lon, b.lat, b.lon)] = d
+            _distanz_cache[(b.lat, b.lon, a.lat, a.lon)] = d
+
 
 @dataclass
 class ScoreGewichte:
@@ -77,10 +97,16 @@ def _avg_paarweise_distanz(mannschaften: list[Mannschaft]) -> float:
     total = 0.0
     paare = 0
     for i in range(n):
+        a = teams_mit_coords[i].spielstaette
         for j in range(i + 1, n):
-            a = teams_mit_coords[i].spielstaette
             b = teams_mit_coords[j].spielstaette
-            total += haversine_km(a.lat, a.lon, b.lat, b.lon)
+            key = (a.lat, a.lon, b.lat, b.lon)
+            d = _distanz_cache.get(key)
+            if d is None:
+                d = haversine_km(a.lat, a.lon, b.lat, b.lon)
+                _distanz_cache[key] = d
+                _distanz_cache[(b.lat, b.lon, a.lat, a.lon)] = d
+            total += d
             paare += 1
 
     return total / paare if paare > 0 else 0.0
