@@ -12,7 +12,7 @@ echo.
 
 :: ─── Zielordner ─────────────────────────────────────────────
 set "INSTALL_DIR=%USERPROFILE%\Spieltagsplaner"
-set "REPO_URL=https://github.com/emirydmr/Spieltagsplanung/archive/refs/heads/main.zip"
+set "REPO_URL=https://github.com/emirydmr/Spieltagsplanung/archive/refs/heads/marek.zip"
 
 :: ─── Prüfe ob Python installiert ist ────────────────────────
 set "PYTHON_CMD="
@@ -78,7 +78,7 @@ if exist "%INSTALL_DIR%\src\api\server.py" (
     powershell -Command "Expand-Archive -Path '!ZIP_FILE!' -DestinationPath '!EXTRACT_DIR!' -Force"
     
     :: Kopiere neue Dateien ueber bestehende (ohne .venv und output zu ueberschreiben)
-    robocopy "!EXTRACT_DIR!\Spieltagsplanung-main" "%INSTALL_DIR%" /e /xd .venv output spielplan_logs /xf *.lnk >nul 2>nul
+    robocopy "!EXTRACT_DIR!\Spieltagsplanung-marek" "%INSTALL_DIR%" /e /xd .venv output spielplan_logs /xf *.lnk >nul 2>nul
     
     rmdir /s /q "!EXTRACT_DIR!" 2>nul
     del "!ZIP_FILE!" 2>nul
@@ -98,9 +98,9 @@ if exist "%INSTALL_DIR%\src\api\server.py" (
     if exist "!EXTRACT_DIR!" rmdir /s /q "!EXTRACT_DIR!"
     powershell -Command "Expand-Archive -Path '!ZIP_FILE!' -DestinationPath '!EXTRACT_DIR!' -Force"
     
-    :: GitHub ZIP enthaelt Unterordner "Spieltagsplanung-main" – verschiebe Inhalt
-    if exist "!EXTRACT_DIR!\Spieltagsplanung-main" (
-        move "!EXTRACT_DIR!\Spieltagsplanung-main" "%INSTALL_DIR%" >nul
+    :: GitHub ZIP enthaelt Unterordner "Spieltagsplanung-marek" – verschiebe Inhalt
+    if exist "!EXTRACT_DIR!\Spieltagsplanung-marek" (
+        move "!EXTRACT_DIR!\Spieltagsplanung-marek" "%INSTALL_DIR%" >nul
     ) else (
         echo  [X] Entpacken fehlgeschlagen!
         pause
